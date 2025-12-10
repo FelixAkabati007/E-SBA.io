@@ -1,4 +1,5 @@
 import express, { Request, Response } from "express";
+import { put } from "@vercel/blob";
 import cors from "cors";
 import multer, { FileFilterCallback, MulterError } from "multer";
 import path from "path";
@@ -344,6 +345,29 @@ app.get("/api/signatures/current", async (req: Request, res: Response) => {
   } catch (e) {
     const err = e as Error;
     res.status(500).json({ error: err.message || "Failed to get signature" });
+  }
+});
+
+// Vercel Blob upload proxy
+app.post("/api/blob/put", upload.single("file"), async (req: Request, res: Response) => {
+  try {
+    const token = process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_BLOB_RW_TOKEN;
+    const access = String(req.query.access || "public") as "public" | "private";
+    const p = String(req.query.path || req.body?.path || (req.file?.originalname ? `uploads/${req.file.originalname}` : "uploads/blob.txt"));
+    if (!token) return res.status(400).json({ error: "Missing BLOB_READ_WRITE_TOKEN" });
+    if (req.file) {
+      const buf = fs.readFileSync(req.file.path);
+      const { url } = await put(p, buf, { access, token, contentType: req.file.mimetype });
+      fs.unlinkSync(req.file.path);
+      return res.json({ ok: true, url });
+    }
+    const content = typeof req.body?.content === "string" ? req.body.content : undefined;
+    if (!content) return res.status(400).json({ error: "No file or content provided" });
+    const { url } = await put(p, content, { access, token, contentType: "text/plain" });
+    return res.json({ ok: true, url });
+  } catch (e) {
+    const err = e as Error;
+    res.status(500).json({ error: err.message || "Blob upload failed" });
   }
 });
 

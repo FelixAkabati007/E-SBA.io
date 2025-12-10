@@ -36,6 +36,16 @@ GitHub Actions workflow runs typecheck, tests, and build on pushes/PRs to `main`
 
 The app is currently client-side only and does not expose an API. Import/Export uses local files and generates Excel/PDF on the client.
 
+### Blob Storage (Vercel)
+
+- Endpoint: `POST /api/blob/put`
+  - Query/body:
+    - `path`: path like `articles/blob.txt`
+    - `access`: `public` | `private` (default `public`)
+    - `file` (multipart) or `content` (string)
+  - Env: `BLOB_READ_WRITE_TOKEN` (or `VERCEL_BLOB_RW_TOKEN`)
+  - Response: `{ ok: true, url }`
+
 ## Security
 
 - Validates image types and sizes for logo upload.
@@ -52,7 +62,6 @@ The app is currently client-side only and does not expose an API. Import/Export 
   - Quick reset (non-transactional): `npm run db:reset`
     - Executes SQL truncation and auto-increment reset
   - Configure DB connection via env vars `DB_HOST`, `DB_USER`, `DB_PASS`, `DB_NAME` (defaults in `server/lib/db.ts`)
-
 
 ## Notes
 
