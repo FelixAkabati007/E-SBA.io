@@ -14,7 +14,8 @@
     "test": "vitest run",
     "test:ui": "vitest",
     "e2e": "playwright test",
-    "db:reset": "tsx server/scripts/reset-db.ts"
+    "db:reset": "tsx server/scripts/reset-db.ts",
+    "db:clean": "tsx server/scripts/clean-master-db.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

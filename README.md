@@ -42,6 +42,18 @@ The app is currently client-side only and does not expose an API. Import/Export 
 - Restricts Excel upload to `.xlsx`/`.xls` and handles parse errors gracefully.
 - No secrets stored or transmitted; all processing occurs in the browser.
 
+## Database Cleanup
+
+- To purge all student-related seed/test data while preserving schema:
+  - Backup and clean: `npm run db:clean`
+    - Creates JSON backups under `server/backups/` for `students`, `assessments`, `academic_sessions`, `audit_logs`
+    - Runs transactional deletes and verifies zero counts
+    - Resets auto-increment for `assessments`, `audit_logs`, `academic_sessions`
+  - Quick reset (non-transactional): `npm run db:reset`
+    - Executes SQL truncation and auto-increment reset
+  - Configure DB connection via env vars `DB_HOST`, `DB_USER`, `DB_PASS`, `DB_NAME` (defaults in `server/lib/db.ts`)
+
+
 ## Notes
 
 - Excel/PDF generation uses `xlsx` and `jspdf` with `jspdf-autotable`.

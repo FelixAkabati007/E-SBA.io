@@ -173,6 +173,12 @@ export default function App() {
   const [reportId, setReportId] = useState("");
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const addStudentFirstFieldRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (isModalOpen) {
+      setTimeout(() => addStudentFirstFieldRef.current?.focus(), 0);
+    }
+  }, [isModalOpen]);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -2434,28 +2440,36 @@ export default function App() {
   const renderMasterDB = () => (
     <div className="space-y-4">
       {isModalOpen && (
-        <div className="fixed inset-0 z-[65] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-blue-50">
-              <h3 className="text-lg font-bold text-blue-900 flex items-center gap-2">
+        <div className="fixed inset-0 z-[65] flex items-center justify-center p-3 sm:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-student-title"
+            className="bg-white rounded-xl shadow-2xl w-full max-w-[95vw] sm:max-w-lg md:max-w-2xl overflow-hidden flex flex-col max-h-[85vh]"
+          >
+            <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-100 flex justify-between items-center bg-blue-50">
+              <h3
+                id="add-student-title"
+                className="text-base sm:text-lg font-bold text-blue-900 flex items-center gap-2"
+              >
                 <Users size={20} className="text-blue-700" />{" "}
                 {editingStudent ? "Edit Student" : "Add Student"}
               </h3>
               <button
                 onClick={closeModal}
-                className="text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-full p-1"
+                className="text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-full p-2"
                 aria-label="Close dialog"
                 title="Close"
               >
                 <X size={20} />
               </button>
             </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-4 sm:p-6 space-y-4 overflow-y-auto">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <label
                     htmlFor="student-id"
-                    className="block text-sm font-medium text-slate-700 mb-1"
+                    className="block text-xs sm:text-sm font-medium text-slate-700 mb-1"
                   >
                     Student ID
                   </label>
@@ -2464,7 +2478,8 @@ export default function App() {
                     name="id"
                     value={formData.id}
                     onChange={handleInputChange}
-                    className="w-full p-2 border rounded"
+                    ref={addStudentFirstFieldRef}
+                    className="w-full p-3 border rounded text-sm sm:text-base"
                   />
                   {formErrors.id && (
                     <p className="text-xs text-red-600 mt-1">{formErrors.id}</p>
@@ -2473,7 +2488,7 @@ export default function App() {
                 <div>
                   <label
                     htmlFor="surname"
-                    className="block text-sm font-medium text-slate-700 mb-1"
+                    className="block text-xs sm:text-sm font-medium text-slate-700 mb-1"
                   >
                     Surname
                   </label>
@@ -2482,7 +2497,7 @@ export default function App() {
                     name="surname"
                     value={formData.surname}
                     onChange={handleInputChange}
-                    className="w-full p-2 border rounded"
+                    className="w-full p-3 border rounded text-sm sm:text-base"
                   />
                   {formErrors.surname && (
                     <p className="text-xs text-red-600 mt-1">
@@ -2493,7 +2508,7 @@ export default function App() {
                 <div>
                   <label
                     htmlFor="first-name"
-                    className="block text-sm font-medium text-slate-700 mb-1"
+                    className="block text-xs sm:text-sm font-medium text-slate-700 mb-1"
                   >
                     First Name
                   </label>
@@ -2502,7 +2517,7 @@ export default function App() {
                     name="firstName"
                     value={formData.firstName}
                     onChange={handleInputChange}
-                    className="w-full p-2 border rounded"
+                    className="w-full p-3 border rounded text-sm sm:text-base"
                   />
                   {formErrors.firstName && (
                     <p className="text-xs text-red-600 mt-1">
@@ -2513,14 +2528,14 @@ export default function App() {
                 <div>
                   <label
                     htmlFor="middle-name"
-                    className="block text-sm font-medium text-slate-700 mb-1"
+                    className="block text-xs sm:text-sm font-medium text-slate-700 mb-1"
                   >
                     Middle Name
                   </label>
                   <input
                     id="middle-name"
                     onChange={handleInputChange}
-                    className="w-full p-2 border rounded"
+                    className="w-full p-3 border rounded text-sm sm:text-base"
                     placeholder="Enter middle name"
                     maxLength={50}
                   />
@@ -2533,7 +2548,7 @@ export default function App() {
                 <div>
                   <label
                     htmlFor="gender"
-                    className="block text-sm font-medium text-slate-700 mb-1"
+                    className="block text-xs sm:text-sm font-medium text-slate-700 mb-1"
                   >
                     Gender
                   </label>
@@ -2542,7 +2557,7 @@ export default function App() {
                     name="gender"
                     value={formData.gender}
                     onChange={handleInputChange}
-                    className="w-full p-2 border rounded bg-slate-50"
+                    className="w-full p-3 border rounded bg-slate-50 text-sm sm:text-base"
                   >
                     <option>Male</option>
                     <option>Female</option>
@@ -2557,7 +2572,7 @@ export default function App() {
                 <div>
                   <label
                     htmlFor="dob"
-                    className="block text-sm font-medium text-slate-700 mb-1"
+                    className="block text-xs sm:text-sm font-medium text-slate-700 mb-1"
                   >
                     Date of Birth
                   </label>
@@ -2567,7 +2582,7 @@ export default function App() {
                     name="dob"
                     value={formData.dob}
                     onChange={handleInputChange}
-                    className="w-full p-2 border rounded"
+                    className="w-full p-3 border rounded text-sm sm:text-base"
                   />
                   {formErrors.dob && (
                     <p className="text-xs text-red-600 mt-1">
@@ -2578,7 +2593,7 @@ export default function App() {
                 <div>
                   <label
                     htmlFor="guardian-contact"
-                    className="block text-sm font-medium text-slate-700 mb-1"
+                    className="block text-xs sm:text-sm font-medium text-slate-700 mb-1"
                   >
                     Guardian Contact
                   </label>
@@ -2587,7 +2602,7 @@ export default function App() {
                     name="guardianContact"
                     value={formData.guardianContact}
                     onChange={handleInputChange}
-                    className="w-full p-2 border rounded"
+                    className="w-full p-3 border rounded text-sm sm:text-base"
                   />
                   {formErrors.guardianContact && (
                     <p className="text-xs text-red-600 mt-1">
@@ -2598,7 +2613,7 @@ export default function App() {
                 <div>
                   <label
                     htmlFor="class-name"
-                    className="block text-sm font-medium text-slate-700 mb-1"
+                    className="block text-xs sm:text-sm font-medium text-slate-700 mb-1"
                   >
                     Class
                   </label>
@@ -2607,7 +2622,7 @@ export default function App() {
                     name="class"
                     value={formData.class}
                     onChange={handleInputChange}
-                    className="w-full p-2 border rounded bg-slate-50"
+                    className="w-full p-3 border rounded bg-slate-50 text-sm sm:text-base"
                   >
                     {AVAILABLE_CLASSES.map((c) => (
                       <option key={c}>{c}</option>
@@ -2645,17 +2660,17 @@ export default function App() {
                 </div>
               )}
             </div>
-            <div className="px-6 py-4 border-t bg-slate-50 flex justify-end gap-3">
+            <div className="px-4 sm:px-6 py-3 sm:py-4 border-t bg-slate-50 flex flex-wrap justify-end gap-2 sm:gap-3">
               <button
                 onClick={closeModal}
-                className="px-4 py-2 bg-slate-100 text-slate-700 rounded hover:bg-slate-200"
+                className="px-4 py-3 bg-slate-100 text-slate-700 rounded hover:bg-slate-200 text-sm sm:text-base"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSaveStudent}
                 disabled={isSubmitting}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2"
+                className="px-4 py-3 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2 text-sm sm:text-base"
               >
                 {isSubmitting ? (
                   <Loader2 size={16} className="animate-spin" />
@@ -2675,13 +2690,21 @@ export default function App() {
         </div>
       )}
       {deleteConfirmation.isOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-sm p-6 transform transition-all scale-100">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-delete-title"
+            className="bg-white rounded-lg shadow-xl w-full max-w-[95vw] sm:max-w-sm p-5 sm:p-6 transform transition-all scale-100"
+          >
             <div className="flex flex-col items-center text-center">
               <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4">
                 <AlertTriangle className="text-red-600" size={24} />
               </div>
-              <h3 className="text-lg font-bold text-slate-900">
+              <h3
+                id="confirm-delete-title"
+                className="text-base sm:text-lg font-bold text-slate-900"
+              >
                 Confirm Deletion
               </h3>
               <p className="text-sm text-slate-500 mt-2">
@@ -2689,16 +2712,16 @@ export default function App() {
                 remove all their personal data and assessment records
                 permanently.
               </p>
-              <div className="flex gap-3 mt-6 w-full">
+              <div className="flex gap-2 sm:gap-3 mt-6 w-full">
                 <button
                   onClick={cancelDelete}
-                  className="flex-1 px-4 py-2 bg-slate-100 text-slate-700 font-medium rounded-lg hover:bg-slate-200 transition-colors"
+                  className="flex-1 px-4 py-3 bg-slate-100 text-slate-700 font-medium rounded-lg hover:bg-slate-200 transition-colors text-sm sm:text-base"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={confirmDelete}
-                  className="flex-1 px-4 py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 transition-colors"
+                  className="flex-1 px-4 py-3 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 transition-colors text-sm sm:text-base"
                 >
                   Delete
                 </button>
@@ -2708,10 +2731,18 @@ export default function App() {
         </div>
       )}
       {isImportModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in zoom-in-95">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-emerald-50">
-              <h3 className="text-lg font-bold text-emerald-900 flex items-center gap-2">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in zoom-in-95">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="import-dialog-title"
+            className="bg-white rounded-xl shadow-2xl w-full max-w-[95vw] sm:max-w-lg md:max-w-2xl overflow-hidden flex flex-col max-h-[85vh]"
+          >
+            <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-100 flex justify-between items-center bg-emerald-50">
+              <h3
+                id="import-dialog-title"
+                className="text-base sm:text-lg font-bold text-emerald-900 flex items-center gap-2"
+              >
                 <FileSpreadsheet size={20} className="text-emerald-600" />
                 Import Student Data (Excel)
               </h3>
@@ -2721,14 +2752,14 @@ export default function App() {
                   setImportLogs([]);
                   setImportedPreview([]);
                 }}
-                className="text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-full p-1"
+                className="text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-full p-2"
                 aria-label="Close import dialog"
                 title="Close"
               >
                 <X size={20} />
               </button>
             </div>
-            <div className="p-6 overflow-y-auto">
+            <div className="p-4 sm:p-6 overflow-y-auto">
               {isImporting && (
                 <div className="flex flex-col items-center justify-center h-64">
                   <Loader2
@@ -2747,7 +2778,7 @@ export default function App() {
                 <div className="mb-6">
                   <div
                     onClick={() => importFileInputRef.current?.click()}
-                    className="border-2 border-dashed border-emerald-200 bg-emerald-50/50 rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer hover:bg-emerald-50 hover:border-emerald-400 transition-all group"
+                    className="border-2 border-dashed border-emerald-200 bg-emerald-50/50 rounded-xl p-6 sm:p-8 flex flex-col items-center justify-center cursor-pointer hover:bg-emerald-50 hover:border-emerald-400 transition-all group"
                   >
                     <div className="p-4 bg-white rounded-full shadow-sm mb-4 group-hover:scale-110 transition-transform">
                       <Upload size={32} className="text-emerald-500" />
@@ -2758,7 +2789,7 @@ export default function App() {
                     <p className="text-sm text-emerald-600 mb-4">
                       Supported formats: .xlsx, .xls
                     </p>
-                    <button className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium shadow-sm hover:shadow">
+                    <button className="px-4 py-3 bg-emerald-600 text-white rounded-lg text-sm font-medium shadow-sm hover:shadow">
                       Select File
                     </button>
                     <input
@@ -2805,7 +2836,7 @@ export default function App() {
                         setImportedPreview([]);
                         setImportLogs([]);
                       }}
-                      className="text-xs text-red-600 hover:text-red-700 hover:underline font-medium"
+                      className="text-xs sm:text-sm text-red-600 hover:text-red-700 hover:underline font-medium"
                     >
                       Clear & Upload New
                     </button>
