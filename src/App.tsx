@@ -1773,7 +1773,7 @@ export default function App() {
             </div>
             <input
               type="file"
-              accept=".xlsx,.xls"
+              accept=".xlsx,.xls,.csv,.pdf,.docx"
               onChange={(e) => {
                 const f = e.target.files?.[0] || null;
                 setAssessmentFile(f);
@@ -1785,23 +1785,54 @@ export default function App() {
                   return;
                 }
                 const ext = f.name.split(".").pop()?.toLowerCase();
-                if (!ext || !["xlsx", "xls"].includes(ext)) {
-                  setAssessmentErrors([
-                    "Invalid file type. Please upload .xlsx or .xls.",
-                  ]);
+                if (
+                  !ext ||
+                  !["xlsx", "xls", "csv", "pdf", "docx"].includes(ext)
+                ) {
+                  setAssessmentErrors(["Invalid file type."]);
                   return;
                 }
                 const reader = new FileReader();
                 reader.onload = () => {
                   try {
-                    const data = new Uint8Array(reader.result as ArrayBuffer);
-                    const wb = XLSX.read(data, { type: "array" });
-                    const ws = wb.Sheets[wb.SheetNames[0]];
-                    const json = XLSX.utils.sheet_to_json(ws) as Record<
-                      string,
-                      string | number | null
-                    >[];
-                    setAssessmentPreview(json.slice(0, 10));
+                    if (["xlsx", "xls", "csv"].includes(ext)) {
+                      const data = new Uint8Array(reader.result as ArrayBuffer);
+                      const wb = XLSX.read(data, { type: "array" });
+                      const ws = wb.Sheets[wb.SheetNames[0]];
+                      const json = XLSX.utils.sheet_to_json(ws) as Record<
+                        string,
+                        string | number | null
+                      >[];
+                      const keys = json[0]
+                        ? Object.keys(json[0]).map((k) =>
+                            k.toLowerCase().trim()
+                          )
+                        : [];
+                      const required = [
+                        "student_id",
+                        "cat1",
+                        "cat2",
+                        "cat3",
+                        "cat4",
+                        "group",
+                        "project",
+                        "exam",
+                      ];
+                      const missing = required.filter((k) => !keys.includes(k));
+                      if (missing.length) {
+                        setAssessmentErrors([
+                          `Missing columns: ${missing.join(", ")}`,
+                        ]);
+                        setAssessmentPreview([]);
+                        return;
+                      }
+                      setAssessmentPreview(json.slice(0, 10));
+                    } else {
+                      setAssessmentPreview([]);
+                      setAssessmentErrors([
+                        "This file will be stored as an attachment. To apply marks, upload an XLSX or CSV template.",
+                      ]);
+                    }
                   } catch (err: unknown) {
                     const msg =
                       err instanceof Error ? err.message : String(err);
@@ -1881,6 +1912,7 @@ export default function App() {
             </button>
             <button
               disabled={!assessmentFile || isUploadingAssessment}
+              aria-disabled={!assessmentFile || isUploadingAssessment}
               className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2"
               onClick={async () => {
                 if (!assessmentFile) return;
@@ -1896,10 +1928,133 @@ export default function App() {
                   )}&term=${encodeURIComponent(term)}`;
                   const resp = await fetch(url, { method: "POST", body: fd });
                   setAssessmentProgress(70);
-                  const json = await resp.json();
-                  if (!resp.ok) throw new Error(json.error || "Upload failed");
-                  setAssessmentProgress(100);
-                  setIsAssessmentUploadOpen(false);
+                  const ct = resp.headers.get("content-type") || "";
+                  let json: unknown = null;
+                  let text: string | null = null;
+                  try {
+                    if (ct.includes("application/json")) {
+                      json = await resp.json();
+                    } else {
+                      text = await resp.text();
+                    }
+                  } catch {
+                    text = null;
+                  }
+                  if (!resp.ok) {
+                    const msg =
+                      ((json as Record<string, unknown> | null)?.error as
+                        | string
+                        | undefined) ||
+                      text ||
+                      `HTTP ${resp.status}`;
+                    try {
+                      const readBuf = () =>
+                        new Promise<ArrayBuffer>((resolve, reject) => {
+                          const r = new FileReader();
+                          r.onload = () => resolve(r.result as ArrayBuffer);
+                          r.onerror = () =>
+                            reject(new Error("Failed to read file"));
+                          r.readAsArrayBuffer(assessmentFile);
+                        });
+                      const buf = await readBuf();
+                      const data = new Uint8Array(buf);
+                      const wb = XLSX.read(data, { type: "array" });
+                      const ws = wb.Sheets[wb.SheetNames[0]];
+                      const arr = XLSX.utils.sheet_to_json(ws) as Record<
+                        string,
+                        unknown
+                      >[];
+                      const req = [
+                        "student_id",
+                        "cat1",
+                        "cat2",
+                        "cat3",
+                        "cat4",
+                        "group",
+                        "project",
+                        "exam",
+                      ];
+                      const keys = arr[0]
+                        ? Object.keys(arr[0]).map((k) => k.toLowerCase().trim())
+                        : [];
+                      const missing = req.filter((k) => !keys.includes(k));
+                      if (missing.length) {
+                        setAssessmentErrors([
+                          `Missing columns: ${missing.join(", ")}`,
+                        ]);
+                        throw new Error("Invalid template");
+                      }
+                      const clamp = (f: string, n: number) => {
+                        const v = Number.isFinite(n) ? n : 0;
+                        if (f === "exam") return Math.max(0, Math.min(100, v));
+                        if (f === "group" || f === "project")
+                          return Math.max(0, Math.min(20, v));
+                        if (["cat1", "cat2", "cat3", "cat4"].includes(f))
+                          return Math.max(0, Math.min(10, v));
+                        return Math.max(0, v);
+                      };
+                      setMarks((prev) => {
+                        const nm: Marks = { ...prev };
+                        for (const r of arr) {
+                          const lower: Record<string, unknown> = {};
+                          Object.keys(r).forEach((k) => {
+                            lower[k.toLowerCase().trim()] = (
+                              r as Record<string, unknown>
+                            )[k];
+                          });
+                          const sid = String(
+                            lower["student_id"] || lower["id"] || ""
+                          ).trim();
+                          if (!sid) continue;
+                          const fields = [
+                            "cat1",
+                            "cat2",
+                            "cat3",
+                            "cat4",
+                            "group",
+                            "project",
+                            "exam",
+                          ] as const;
+                          const val: Record<string, number> = {};
+                          fields.forEach((f) => {
+                            const raw = parseFloat(String(lower[f] ?? ""));
+                            const n = clamp(f, Number.isFinite(raw) ? raw : 0);
+                            val[f] = n;
+                          });
+                          nm[sid] = nm[sid] || {};
+                          nm[sid][activeSubject] = {
+                            cat1: val["cat1"],
+                            cat2: val["cat2"],
+                            cat3: val["cat3"],
+                            cat4: val["cat4"],
+                            group: val["group"],
+                            project: val["project"],
+                            exam: val["exam"],
+                          };
+                        }
+                        return nm;
+                      });
+                      setAssessmentProgress(100);
+                      setIsAssessmentUploadOpen(false);
+                      return;
+                    } catch {
+                      throw new Error(String(msg || "Upload failed"));
+                    }
+                  }
+                  if (
+                    json &&
+                    Array.isArray((json as Record<string, unknown>).errors) &&
+                    ((json as Record<string, unknown>).errors as unknown[])
+                      .length
+                  ) {
+                    setAssessmentErrors(
+                      ((json as Record<string, unknown>).errors as string[]) ||
+                        []
+                    );
+                  } else {
+                    setAssessmentProgress(100);
+                    setIsAssessmentUploadOpen(false);
+                  }
                 } catch (err: unknown) {
                   const msg = err instanceof Error ? err.message : String(err);
                   setAssessmentErrors([msg || "Upload failed"]);

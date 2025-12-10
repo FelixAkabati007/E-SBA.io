@@ -113,10 +113,27 @@ app.post(
       if (rows.length === 0)
         return res.status(400).json({ error: "No valid rows", errors });
 
-      const conn = await pool.getConnection();
+      let conn;
+      try {
+        conn = await pool.getConnection();
+      } catch (dbErr) {
+        const msg = (dbErr as Error).message || "Database unavailable";
+        return res.status(503).json({ error: msg });
+      }
       try {
         await saveMarksTransaction(conn, subject, academicYear, term, rows);
         res.json({ ok: true, processed: rows.length, errors });
+      } catch (err) {
+        const msg = (err as Error).message || "Upload failed";
+        if (msg.toLowerCase().includes("subject not found")) {
+          return res
+            .status(400)
+            .json({
+              error:
+                "Selected subject is not configured. Please choose a valid subject.",
+            });
+        }
+        return res.status(500).json({ error: msg });
       } finally {
         conn.release();
       }
