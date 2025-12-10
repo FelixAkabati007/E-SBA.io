@@ -2,6 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
+.no-horizontal-scroll {
+  overflow-x: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-loader .ball,
+  .welcome-loader .bar {
+    animation: none !important;
+  }
+}
+
 .welcome-loader .ball {
   position: relative;
   bottom: 50px;
