@@ -1,17 +1,16 @@
 import request from "supertest";
 import fs from "fs";
 import app from "../index";
+import { describe, it, expect } from "vitest";
 
 describe("/api/assessments/template/save", () => {
   it("saves generated template to uploads when generation succeeds", async () => {
-    const res = await request(app)
-      .get("/api/assessments/template/save")
-      .query({
-        subject: "Mathematics",
-        class: "JHS 1",
-        academicYear: "2025/2026",
-        term: "Term 1",
-      });
+    const res = await request(app).get("/api/assessments/template/save").query({
+      subject: "Mathematics",
+      class: "JHS 1",
+      academicYear: "2025/2026",
+      term: "Term 1",
+    });
     expect([200, 400, 500]).toContain(res.status);
     if (res.status === 200) {
       expect(res.body).toHaveProperty("ok", true);
@@ -23,7 +22,9 @@ describe("/api/assessments/template/save", () => {
       // cleanup the saved file
       try {
         fs.unlinkSync(p);
-      } catch {}
+      } catch (_e) {
+        void _e;
+      }
     }
   });
 });

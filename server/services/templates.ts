@@ -323,6 +323,34 @@ export async function buildAssessmentTemplateXLSX(
     });
   });
 
+  const start = headerRow.number + 1;
+  const dv = (
+    ws as unknown as {
+      dataValidations?: { add: (r: string, c: unknown) => void };
+    }
+  ).dataValidations;
+  dv?.add(`D${start}:G1048576`, {
+    type: "whole",
+    operator: "between",
+    formulae: [0, 10],
+    allowBlank: true,
+    showErrorMessage: true,
+  });
+  dv?.add(`H${start}:I1048576`, {
+    type: "whole",
+    operator: "between",
+    formulae: [0, 20],
+    allowBlank: true,
+    showErrorMessage: true,
+  });
+  dv?.add(`J${start}:J1048576`, {
+    type: "whole",
+    operator: "between",
+    formulae: [0, 100],
+    allowBlank: true,
+    showErrorMessage: true,
+  });
+
   ws.getColumn("cat1").outlineLevel = 1;
   ws.getColumn("cat2").outlineLevel = 1;
   ws.getColumn("cat3").outlineLevel = 1;
@@ -331,10 +359,11 @@ export async function buildAssessmentTemplateXLSX(
   ws.getColumn("project").outlineLevel = 1;
   ws.getColumn("exam").outlineLevel = 1;
 
-  const buf = await wb.xlsx.writeBuffer();
+  const arrBuf = await wb.xlsx.writeBuffer();
+  const buf = Buffer.from(arrBuf);
   // Verify OOXML loads with ExcelJS to catch malformed merges / XML
   try {
-    await validateWorkbookXLSX(Buffer.from(buf));
+    await validateWorkbookXLSX(buf);
   } catch (err) {
     // Propagate a clearer error for callers
     throw new Error(
@@ -342,7 +371,7 @@ export async function buildAssessmentTemplateXLSX(
     );
   }
 
-  return Buffer.from(buf);
+  return buf;
 }
 
 /**
@@ -361,7 +390,7 @@ export async function validateWorkbookXLSX(buf: Buffer): Promise<boolean> {
       return false;
     // Also ensure ExcelJS can parse the OOXML parts
     const xwb = new ExcelJS.Workbook();
-    await xwb.xlsx.load(buf);
+    await xwb.xlsx.load(new Uint8Array(buf));
     if (!Array.isArray(xwb.worksheets) || xwb.worksheets.length === 0)
       return false;
     return true;

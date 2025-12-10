@@ -26,6 +26,10 @@ export async function parseAssessmentSheet(filePath: string): Promise<{ rows: Ro
   const ws = wb.Sheets[wb.SheetNames[0]];
   const json = XLSX.utils.sheet_to_json(ws) as Record<string, unknown>[];
   const errors: string[] = [];
+  const required = ["student_id", "cat1", "cat2", "cat3", "cat4", "group", "project", "exam"] as const;
+  const keys = json[0] ? Object.keys(json[0]).map((k) => k.toLowerCase().trim()) : [];
+  const missing = required.filter((k) => !keys.includes(k));
+  if (missing.length) errors.push(`Missing columns: ${missing.join(", ")}`);
   const rows: Row[] = json.map((r, i) => {
     const lower: Record<string, unknown> = {};
     Object.keys(r).forEach((k) => (lower[k.toLowerCase().trim()] = (r as Record<string, unknown>)[k]));
@@ -33,7 +37,9 @@ export async function parseAssessmentSheet(filePath: string): Promise<{ rows: Ro
     const fields = ["cat1", "cat2", "cat3", "cat4", "group", "project", "exam"] as const;
     const base: Partial<Row> = { student_id };
     fields.forEach((f) => {
-      const n = clamp(f, parseFloat(String(lower[f] ?? 0)) || 0);
+      const raw = parseFloat(String(lower[f] ?? ""));
+      if (!Number.isFinite(raw)) errors.push(`Row ${i + 2}: ${f} is not a number`);
+      const n = clamp(f, Number.isFinite(raw) ? raw : 0);
       base[f] = n;
     });
     if (!student_id) errors.push(`Row ${i + 2}: missing student_id`);
