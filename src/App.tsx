@@ -39,7 +39,15 @@ import {
   loadMarksSession,
   subscribeAssessments,
 } from "./lib/dataPersistence";
-import { saveUploadedFile, saveDownloadedContent } from "./lib/storage";
+import {
+  saveUploadedFile,
+  saveDownloadedContent,
+  list,
+  getUsage,
+  getData,
+  remove,
+  cleanup,
+} from "./lib/storage";
 
 const MasterDBSyncControls: React.FC = () => null;
 
@@ -194,6 +202,15 @@ export default function App() {
 
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importLogs, setImportLogs] = useState<ImportLog[]>([]);
+  const [isStorageOpen, setIsStorageOpen] = useState(false);
+  const [storageItems, setStorageItems] = useState<
+    Awaited<ReturnType<typeof list>>
+  >([]);
+  const [storageUsage, setStorageUsage] = useState<{
+    quota?: number;
+    usage?: number;
+    lsBytes: number;
+  }>({ lsBytes: 0 });
   useEffect(() => {
     let cancelled = false;
     const subject = activeSubject;
@@ -496,17 +513,35 @@ export default function App() {
     setImportLogs([]);
     setImportedPreview([]);
 
+    (async () => {
+      try {
+        await saveUploadedFile(
+          undefined,
+          file,
+          ["excel-import", selectedClass || ""],
+          undefined
+        );
+      } catch {
+        void 0;
+      }
+    })();
+
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         const data = evt.target?.result as ArrayBuffer;
-        const workbook = XLSX.read(data, { type: "array" });
+        const workbook = XLSX.read(data, {
+          type: "array",
+          cellDates: true,
+          cellNF: true,
+          cellText: true,
+        });
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet) as Record<
-          string,
-          unknown
-        >[];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, {
+          raw: false,
+          defval: "",
+        }) as Record<string, unknown>[];
         if (jsonData.length === 0) throw new Error("File appears to be empty.");
         const normalizedData = jsonData.map((row) => {
           const newRow: ImportedRow = {};
@@ -517,6 +552,44 @@ export default function App() {
           });
           return newRow;
         });
+        const ref = worksheet["!ref"] || "";
+        const range = XLSX.utils.decode_range(ref);
+        const cells: Array<{
+          addr: string;
+          r: number;
+          c: number;
+          t?: string;
+          v?: unknown;
+          w?: string;
+          f?: string;
+          z?: string;
+        }> = [];
+        for (let R = range.s.r; R <= range.e.r; R++) {
+          for (let C = range.s.c; C <= range.e.c; C++) {
+            const addr = XLSX.utils.encode_cell({ r: R, c: C });
+            const cell = (
+              worksheet as unknown as Record<string, XLSX.CellObject>
+            )[addr];
+            if (!cell) continue;
+            const w = cell.w || XLSX.utils.format_cell(cell);
+            cells.push({
+              addr,
+              r: R,
+              c: C,
+              t: cell.t,
+              v: cell.v,
+              w,
+              f: cell.f,
+              z: cell.z,
+            });
+          }
+        }
+        const rich = {
+          sheet: firstSheetName,
+          ref,
+          rows: normalizedData,
+          cells,
+        };
         setImportedPreview(normalizedData);
         setImportLogs((prev) => [
           ...prev,
@@ -525,6 +598,19 @@ export default function App() {
             message: `Successfully parsed ${jsonData.length} records. Please review below.`,
           },
         ]);
+        try {
+          await saveDownloadedContent(
+            undefined,
+            JSON.stringify(rich),
+            "application/json",
+            ["excel-import-json", selectedClass || ""],
+            undefined,
+            true,
+            file.name
+          );
+        } catch {
+          void 0;
+        }
       } catch (err) {
         logger.error("Excel parse error", err);
         setImportLogs((prev) => [
@@ -547,6 +633,65 @@ export default function App() {
       setIsImporting(false);
     };
     reader.readAsArrayBuffer(file);
+  };
+
+  const refreshStorage = async () => {
+    try {
+      const items = await list({ tag: "excel-import" });
+      const jsonItems = await list({ tag: "excel-import-json" });
+      const merged = [...items, ...jsonItems].sort(
+        (a, b) => b.timestamp - a.timestamp
+      );
+      setStorageItems(merged);
+      const usage = await getUsage();
+      setStorageUsage(usage);
+    } catch {
+      void 0;
+    }
+  };
+
+  useEffect(() => {
+    if (isStorageOpen) refreshStorage();
+  }, [isStorageOpen]);
+
+  const downloadStoredItem = async (id: string) => {
+    try {
+      const v = await getData(id);
+      if (!v) return;
+      const payload =
+        typeof v.data === "string"
+          ? new Blob([v.data], { type: v.meta.type })
+          : new Blob([v.data as ArrayBuffer], { type: v.meta.type });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(payload);
+      a.download = v.meta.name || v.meta.id;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch {
+      void 0;
+    }
+  };
+
+  const deleteStoredItem = async (id: string) => {
+    try {
+      await remove(id);
+      await refreshStorage();
+    } catch {
+      void 0;
+    }
+  };
+
+  const clearExcelStorage = async () => {
+    try {
+      await cleanup({
+        predicate: (m) =>
+          (m.tags || []).includes("excel-import") ||
+          (m.tags || []).includes("excel-import-json"),
+      });
+      await refreshStorage();
+    } catch {
+      void 0;
+    }
   };
 
   const processImport = () => {
@@ -3233,6 +3378,12 @@ export default function App() {
             <Upload size={16} /> Import Excel
           </button>
           <button
+            onClick={() => setIsStorageOpen((p) => !p)}
+            className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-lg text-sm font-medium"
+          >
+            <Database size={16} /> Storage
+          </button>
+          <button
             onClick={openCreateModal}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg text-sm font-medium shadow-sm hover:shadow transition-all"
           >
@@ -3247,6 +3398,84 @@ export default function App() {
           <MasterDBSyncControls />
         </div>
       </div>
+      {isStorageOpen && (
+        <div className="mt-4 bg-white rounded-lg border border-slate-200 shadow-sm p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm text-slate-600">
+              {`Local: ${(storageUsage.lsBytes / (1024 * 1024)).toFixed(2)} MB`}
+              {storageUsage.usage && storageUsage.quota
+                ? ` | IndexedDB: ${(
+                    (storageUsage.usage || 0) /
+                    (1024 * 1024)
+                  ).toFixed(2)} MB / ${(
+                    (storageUsage.quota || 0) /
+                    (1024 * 1024)
+                  ).toFixed(2)} MB`
+                : ""}
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={refreshStorage}
+                className="px-3 py-1 bg-white border border-slate-200 text-slate-700 rounded"
+              >
+                Refresh
+              </button>
+              <button
+                onClick={clearExcelStorage}
+                className="px-3 py-1 bg-red-600 text-white rounded"
+              >
+                Clear Excel Data
+              </button>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left text-slate-500">
+                  <th className="py-2 px-2">Name</th>
+                  <th className="py-2 px-2">Kind</th>
+                  <th className="py-2 px-2">Type</th>
+                  <th className="py-2 px-2">Size</th>
+                  <th className="py-2 px-2">Imported</th>
+                  <th className="py-2 px-2">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {storageItems.map((m) => (
+                  <tr key={m.id} className="border-t border-slate-100">
+                    <td className="py-2 px-2">{m.name || m.id}</td>
+                    <td className="py-2 px-2">{m.kind}</td>
+                    <td className="py-2 px-2">{m.type}</td>
+                    <td className="py-2 px-2">{`${(
+                      m.size /
+                      (1024 * 1024)
+                    ).toFixed(2)} MB`}</td>
+                    <td className="py-2 px-2">
+                      {new Date(m.timestamp).toLocaleString()}
+                    </td>
+                    <td className="py-2 px-2">
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => downloadStoredItem(m.id)}
+                          className="px-3 py-1 bg-white border border-slate-200 text-slate-700 rounded"
+                        >
+                          Download
+                        </button>
+                        <button
+                          onClick={() => deleteStoredItem(m.id)}
+                          className="px-3 py-1 bg-red-600 text-white rounded"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
       <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-slate-200">
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left whitespace-nowrap">

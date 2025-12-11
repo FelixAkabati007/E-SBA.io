@@ -12,6 +12,8 @@ export type StoredItemMeta = {
   iv?: string;
   salt?: string;
   tags?: string[];
+  name?: string;
+  compressed?: boolean;
 };
 
 type SaveOptions = {
@@ -21,6 +23,8 @@ type SaveOptions = {
   encrypt?: boolean;
   passphrase?: string;
   tags?: string[];
+  name?: string;
+  compress?: boolean;
 };
 
 const LS_NS = "STORAGE::";
@@ -149,7 +153,7 @@ function validateMeta(meta: StoredItemMeta): boolean {
 
 async function openIDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(IDB_DB, 1);
+    const req = indexedDB.open(IDB_DB, 2);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(IDB_STORE)) {
@@ -157,6 +161,22 @@ async function openIDB(): Promise<IDBDatabase> {
         store.createIndex("timestamp", "timestamp", { unique: false });
         store.createIndex("type", "type", { unique: false });
         store.createIndex("kind", "kind", { unique: false });
+        store.createIndex("name", "name", { unique: false });
+        store.createIndex("tags", "tags", { unique: false, multiEntry: true });
+      } else {
+        try {
+          const tx = db.transaction(IDB_STORE, "versionchange");
+          const store = tx.objectStore(IDB_STORE);
+          if (!store.indexNames.contains("name"))
+            store.createIndex("name", "name", { unique: false });
+          if (!store.indexNames.contains("tags"))
+            store.createIndex("tags", "tags", {
+              unique: false,
+              multiEntry: true,
+            });
+        } catch {
+          void 0;
+        }
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -210,7 +230,21 @@ export async function saveData(
 ): Promise<{ id: string; meta: StoredItemMeta }> {
   const id = options.id || uid();
   const ts = Date.now();
-  const buf = typeof data === "string" ? enc.encode(data).buffer : data;
+  let buf = typeof data === "string" ? enc.encode(data).buffer : data;
+  if (options.compress && typeof data === "string") {
+    try {
+      if (typeof CompressionStream !== "undefined") {
+        const comp = new CompressionStream("gzip");
+        const b = new Blob([data]);
+        const ab = await new Response(
+          b.stream().pipeThrough(comp)
+        ).arrayBuffer();
+        buf = ab;
+      }
+    } catch (e) {
+      logger.warn("storage_compress_failed", e);
+    }
+  }
   let toStore = buf;
   let iv: Uint8Array | undefined;
   let salt: Uint8Array | undefined;
@@ -236,6 +270,8 @@ export async function saveData(
     iv: iv ? toBase64Bytes(iv) : undefined,
     salt: salt ? toBase64Bytes(salt) : undefined,
     tags: options.tags || [],
+    name: options.name,
+    compressed: !!options.compress,
   };
   if (!validateMeta(meta)) throw new Error("Invalid metadata");
   try {
@@ -283,7 +319,21 @@ export async function getData(
       }
       const isText =
         /^text\//.test(meta.type) || meta.type === "application/json";
-      return { meta, data: isText ? dec.decode(buf) : buf };
+      if (isText) {
+        if (meta.compressed && typeof DecompressionStream !== "undefined") {
+          try {
+            const ds = new DecompressionStream("gzip");
+            const ab = await new Response(
+              new Blob([buf]).stream().pipeThrough(ds)
+            ).arrayBuffer();
+            return { meta, data: dec.decode(ab) };
+          } catch (e) {
+            logger.warn("storage_decompress_failed", e);
+          }
+        }
+        return { meta, data: dec.decode(buf) };
+      }
+      return { meta, data: buf };
     }
   } catch (e) {
     logger.warn("storage_local_get_failed", e);
@@ -303,7 +353,21 @@ export async function getData(
     }
     const isText =
       /^text\//.test(meta.type) || meta.type === "application/json";
-    return { meta, data: isText ? dec.decode(buf) : buf };
+    if (isText) {
+      if (meta.compressed && typeof DecompressionStream !== "undefined") {
+        try {
+          const ds = new DecompressionStream("gzip");
+          const ab = await new Response(
+            new Blob([buf]).stream().pipeThrough(ds)
+          ).arrayBuffer();
+          return { meta, data: dec.decode(ab) };
+        } catch (e) {
+          logger.warn("storage_decompress_failed", e);
+        }
+      }
+      return { meta, data: dec.decode(buf) };
+    }
+    return { meta, data: buf };
   } catch (e) {
     logger.error("storage_idb_get_failed", e);
     return null;
@@ -311,7 +375,14 @@ export async function getData(
 }
 
 export async function list(
-  filter?: Partial<{ kind: Kind; type: string; before: number; after: number }>
+  filter?: Partial<{
+    kind: Kind;
+    type: string;
+    before: number;
+    after: number;
+    name: string;
+    tag: string;
+  }>
 ): Promise<StoredItemMeta[]> {
   const out: StoredItemMeta[] = [];
   try {
@@ -344,6 +415,8 @@ export async function list(
     if (f.type && m.type !== f.type) return false;
     if (typeof f.before === "number" && m.timestamp >= f.before) return false;
     if (typeof f.after === "number" && m.timestamp <= f.after) return false;
+    if (f.name && (m.name || "") !== f.name) return false;
+    if (f.tag && !(m.tags || []).includes(f.tag)) return false;
     return true;
   });
 }
@@ -417,6 +490,7 @@ export async function saveUploadedFile(
     encrypt: !!passphrase,
     passphrase,
     tags,
+    name: file.name,
   });
 }
 
@@ -425,7 +499,9 @@ export async function saveDownloadedContent(
   content: ArrayBuffer | string,
   type: string,
   tags?: string[],
-  passphrase?: string
+  passphrase?: string,
+  compress?: boolean,
+  name?: string
 ): Promise<{ id: string; meta: StoredItemMeta }> {
   return saveData(content, {
     id,
@@ -434,5 +510,7 @@ export async function saveDownloadedContent(
     encrypt: !!passphrase,
     passphrase,
     tags,
+    compress,
+    name,
   });
 }
