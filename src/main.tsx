@@ -5,6 +5,10 @@ import "./index.css";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { inject } from "@vercel/analytics";
 import { ClientSync } from "./lib/sync";
+const apiBase =
+  (import.meta as unknown as { env?: Record<string, string> }).env?.[
+    "VITE_API_BASE"
+  ] || "/api";
 import { supabase } from "./lib/supabase";
 
 const rootEl = document.getElementById("root")!;
@@ -14,7 +18,7 @@ const token =
     ? localStorage.getItem("BLOB_RW_TOKEN") || undefined
     : undefined;
 const clientSync = new ClientSync({
-  baseUrl: "/api",
+  baseUrl: apiBase,
   token,
   throttleMs: 1000,
   batchSize: 50,
@@ -24,7 +28,10 @@ clientSync.start();
 (async () => {
   if (!supabase) return;
   try {
-    const { data, error } = await supabase.from("instruments").select().limit(1);
+    const { data, error } = await supabase
+      .from("instruments")
+      .select()
+      .limit(1);
     if (error) {
       console.warn("[Supabase]", { error });
     } else {

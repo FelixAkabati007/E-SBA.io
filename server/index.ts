@@ -6,10 +6,11 @@ import path from "path";
 import crypto from "crypto";
 import fs from "fs";
 import rateLimit from "express-rate-limit";
+import { parseAssessmentSheet } from "./services/assessments";
 import {
-  parseAssessmentSheet,
-  saveMarksTransaction,
-} from "./services/assessments";
+  saveMarksSupabase,
+  getSubjectSheetSupabase,
+} from "./services/supabaseAssessments";
 import {
   buildAssessmentTemplateXLSX,
   buildAssessmentTemplateCSV,
@@ -150,15 +151,10 @@ app.post(
       if (rows.length === 0)
         return res.status(400).json({ error: "No valid rows", errors });
 
-      let conn;
       try {
-        conn = await pool.getConnection();
-      } catch (dbErr) {
-        const msg = (dbErr as Error).message || "Database unavailable";
-        return res.status(503).json({ error: msg });
-      }
-      try {
-        await saveMarksTransaction(conn, subject, academicYear, term, rows);
+        if (!supabaseAdmin)
+          return res.status(500).json({ error: "Supabase not configured" });
+        await saveMarksSupabase(subject, academicYear, term, rows);
         res.json({ ok: true, processed: rows.length, errors });
       } catch (err) {
         const msg = (err as Error).message || "Upload failed";
@@ -169,8 +165,6 @@ app.post(
           });
         }
         return res.status(500).json({ error: msg });
-      } finally {
-        conn.release();
       }
     } catch (e) {
       const err = e as Error;
@@ -644,3 +638,28 @@ app.listen(port, () => {
 });
 
 export default app;
+app.get("/api/assessments/sheet", async (req: Request, res: Response) => {
+  try {
+    const subject = String(req.query.subject || "");
+    const className = String(req.query.class || "");
+    const academicYear = String(req.query.academicYear || "");
+    const term = String(req.query.term || "");
+    if (!subject || !className || !academicYear || !term) {
+      return res.status(400).json({ error: "Missing required parameters" });
+    }
+    if (!supabaseAdmin)
+      return res.status(500).json({ error: "Supabase not configured" });
+    const rows = await getSubjectSheetSupabase(
+      className,
+      subject,
+      academicYear,
+      term
+    );
+    res.json({ rows });
+  } catch (e) {
+    const err = e as Error;
+    const msg = err.message || "Failed to load subject sheet";
+    const code = msg.toLowerCase().includes("subject not found") ? 400 : 500;
+    res.status(code).json({ error: msg });
+  }
+});

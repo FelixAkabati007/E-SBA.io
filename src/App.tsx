@@ -32,7 +32,14 @@ import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
 import "jspdf-autotable";
 import { logger } from "./lib/logger";
+import { apiClient } from "./lib/apiClient";
 import SignatureUpload from "./components/SignatureUpload";
+import {
+  saveMarksSession,
+  loadMarksSession,
+  subscribeAssessments,
+} from "./lib/dataPersistence";
+import { saveUploadedFile, saveDownloadedContent } from "./lib/storage";
 
 const MasterDBSyncControls: React.FC = () => null;
 
@@ -187,6 +194,177 @@ export default function App() {
 
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importLogs, setImportLogs] = useState<ImportLog[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const subject = activeSubject;
+    const cls = selectedClass;
+    const year = academicYear;
+    const t = term;
+    if (!subject || !cls || !year || !t) return;
+    (async () => {
+      try {
+        const data = await apiClient.getSubjectSheet({
+          subject,
+          class: cls,
+          academicYear: year,
+          term: t,
+        });
+        const rows = Array.isArray(data.rows) ? data.rows : [];
+        if (cancelled) return;
+        saveMarksSession(
+          { subject, class: cls, academicYear: year, term: t },
+          rows
+        );
+        if (rows.length === 0) {
+          setImportLogs((prev) => [
+            ...prev,
+            {
+              status: "warning",
+              message: "No saved marks found for selection.",
+            },
+          ]);
+          return;
+        }
+        setMarks((prev) => {
+          const next: Marks = { ...prev };
+          for (const r of rows) {
+            const sid = String(r.student_id || "");
+            if (!sid) continue;
+            next[sid] =
+              next[sid] ||
+              ({} as Record<
+                string,
+                {
+                  cat1: number;
+                  cat2: number;
+                  cat3: number;
+                  cat4: number;
+                  group: number;
+                  project: number;
+                  exam: number;
+                }
+              >);
+            next[sid][subject] = {
+              cat1: Number(r.cat1_score || 0),
+              cat2: Number(r.cat2_score || 0),
+              cat3: Number(r.cat3_score || 0),
+              cat4: Number(r.cat4_score || 0),
+              group: Number(r.group_work_score || 0),
+              project: Number(r.project_work_score || 0),
+              exam: Number(r.exam_score || 0),
+            };
+          }
+          return next;
+        });
+        setImportLogs((prev) => [
+          ...prev,
+          { status: "success", message: `Loaded ${rows.length} saved marks.` },
+        ]);
+      } catch (e) {
+        logger.error("marks_load_exception", e);
+        const cached = loadMarksSession({
+          subject,
+          class: cls,
+          academicYear: year,
+          term: t,
+        });
+        if (cached && Array.isArray(cached.rows) && cached.rows.length) {
+          const rows = cached.rows;
+          setMarks((prev) => {
+            const next: Marks = { ...prev };
+            for (const r of rows) {
+              const sid = String(r.student_id || "");
+              if (!sid) continue;
+              next[sid] =
+                next[sid] ||
+                ({} as Record<
+                  string,
+                  {
+                    cat1: number;
+                    cat2: number;
+                    cat3: number;
+                    cat4: number;
+                    group: number;
+                    project: number;
+                    exam: number;
+                  }
+                >);
+              next[sid][subject] = {
+                cat1: Number(r.cat1_score || 0),
+                cat2: Number(r.cat2_score || 0),
+                cat3: Number(r.cat3_score || 0),
+                cat4: Number(r.cat4_score || 0),
+                group: Number(r.group_work_score || 0),
+                project: Number(r.project_work_score || 0),
+                exam: Number(r.exam_score || 0),
+              };
+            }
+            return next;
+          });
+          setImportLogs((prev) => [
+            ...prev,
+            {
+              status: "success",
+              message: `Loaded ${rows.length} cached marks (offline).`,
+            },
+          ]);
+        } else {
+          setImportLogs((prev) => [
+            ...prev,
+            { status: "error", message: "Error loading saved marks." },
+          ]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSubject, selectedClass, academicYear, term]);
+
+  useEffect(() => {
+    const cls = selectedClass;
+    const subject = activeSubject;
+    const year = academicYear;
+    const t = term;
+    if (!subject || !cls || !year || !t) return;
+    const unsubscribe = subscribeAssessments(
+      { subject, class: cls, academicYear: year, term: t },
+      (rows) => {
+        setMarks((prev) => {
+          const next: Marks = { ...prev };
+          for (const r of rows) {
+            const sid = String(r.student_id || "");
+            if (!sid) continue;
+            next[sid] =
+              next[sid] ||
+              ({} as Record<
+                string,
+                {
+                  cat1: number;
+                  cat2: number;
+                  cat3: number;
+                  cat4: number;
+                  group: number;
+                  project: number;
+                  exam: number;
+                }
+              >);
+            next[sid][subject] = {
+              cat1: Number(r.cat1_score || 0),
+              cat2: Number(r.cat2_score || 0),
+              cat3: Number(r.cat3_score || 0),
+              cat4: Number(r.cat4_score || 0),
+              group: Number(r.group_work_score || 0),
+              project: Number(r.project_work_score || 0),
+              exam: Number(r.exam_score || 0),
+            };
+          }
+          return next;
+        });
+      }
+    );
+    return () => unsubscribe();
+  }, [activeSubject, selectedClass, academicYear, term]);
   const [isImporting, setIsImporting] = useState(false);
   type ImportedRow = Record<string, unknown>;
   const [importedPreview, setImportedPreview] = useState<ImportedRow[]>([]);
@@ -1464,19 +1642,16 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/meta/talent-remarks");
-        if (res.ok) {
-          const data = (await res.json()) as {
-            groups: Array<{ group: string; options: string[] }>;
-          };
-          if (Array.isArray(data.groups) && data.groups.length > 0) {
-            setTalentRemarkOptionsGrouped(data.groups);
-            return;
-          }
+        const data = await apiClient.getTalentRemarks();
+        const groups = Array.isArray(data.groups) ? data.groups : [];
+        if (groups.length > 0) {
+          setTalentRemarkOptionsGrouped(groups);
+          return;
         }
       } catch (e) {
-        void e;
+        logger.warn("talent_remarks_fetch_failed", e);
       }
+      logger.info("talent_remarks_fallback_default");
       setTalentRemarkOptionsGrouped([
         {
           group: "Positive",
@@ -1707,6 +1882,16 @@ export default function App() {
                 ev.preventDefault();
                 const f = ev.dataTransfer.files?.[0] || null;
                 setAssessmentFile(f);
+                try {
+                  void saveUploadedFile(
+                    undefined,
+                    f,
+                    ["assessment", activeSubject || "", selectedClass || ""],
+                    undefined
+                  );
+                } catch {
+                  void 0;
+                }
                 setAssessmentErrors([]);
                 setAssessmentPreview([]);
                 if (!f) return;
@@ -1891,34 +2076,17 @@ export default function App() {
                 setIsUploadingAssessment(true);
                 setAssessmentProgress(10);
                 try {
-                  const fd = new FormData();
-                  fd.append("file", assessmentFile);
-                  const url = `/api/assessments/upload?subject=${encodeURIComponent(
-                    activeSubject
-                  )}&academicYear=${encodeURIComponent(
-                    academicYear
-                  )}&term=${encodeURIComponent(term)}`;
-                  const resp = await fetch(url, { method: "POST", body: fd });
-                  setAssessmentProgress(70);
-                  const ct = resp.headers.get("content-type") || "";
-                  let json: unknown = null;
-                  let text: string | null = null;
-                  try {
-                    if (ct.includes("application/json")) {
-                      json = await resp.json();
-                    } else {
-                      text = await resp.text();
+                  const resp = await apiClient.uploadAssessments(
+                    assessmentFile,
+                    {
+                      subject: activeSubject,
+                      academicYear,
+                      term,
                     }
-                  } catch {
-                    text = null;
-                  }
-                  if (!resp.ok) {
-                    const msg =
-                      ((json as Record<string, unknown> | null)?.error as
-                        | string
-                        | undefined) ||
-                      text ||
-                      `HTTP ${resp.status}`;
+                  );
+                  setAssessmentProgress(70);
+                  const json: unknown = resp as unknown;
+                  if (!json) {
                     try {
                       const readBuf = () =>
                         new Promise<ArrayBuffer>((resolve, reject) => {
@@ -2010,7 +2178,7 @@ export default function App() {
                       setIsAssessmentUploadOpen(false);
                       return;
                     } catch {
-                      throw new Error(String(msg || "Upload failed"));
+                      throw new Error("Upload failed");
                     }
                   }
                   if (
@@ -2026,6 +2194,70 @@ export default function App() {
                   } else {
                     setAssessmentProgress(100);
                     setIsAssessmentUploadOpen(false);
+                    try {
+                      const data2 = await apiClient.getSubjectSheet({
+                        subject: activeSubject,
+                        class: selectedClass,
+                        academicYear,
+                        term,
+                      });
+                      try {
+                        await saveDownloadedContent(
+                          undefined,
+                          JSON.stringify(data2.rows || []),
+                          "application/json",
+                          [
+                            "subject-sheet",
+                            activeSubject || "",
+                            selectedClass || "",
+                          ],
+                          undefined
+                        );
+                      } catch {
+                        void 0;
+                      }
+                      const rows2 = Array.isArray(data2.rows) ? data2.rows : [];
+                      setMarks((prev) => {
+                        const next: Marks = { ...prev };
+                        for (const r of rows2) {
+                          const sid = String(r.student_id || "");
+                          if (!sid) continue;
+                          next[sid] =
+                            next[sid] ||
+                            ({} as Record<
+                              string,
+                              {
+                                cat1: number;
+                                cat2: number;
+                                cat3: number;
+                                cat4: number;
+                                group: number;
+                                project: number;
+                                exam: number;
+                              }
+                            >);
+                          next[sid][activeSubject] = {
+                            cat1: Number(r.cat1_score || 0),
+                            cat2: Number(r.cat2_score || 0),
+                            cat3: Number(r.cat3_score || 0),
+                            cat4: Number(r.cat4_score || 0),
+                            group: Number(r.group_work_score || 0),
+                            project: Number(r.project_work_score || 0),
+                            exam: Number(r.exam_score || 0),
+                          };
+                        }
+                        return next;
+                      });
+                      setImportLogs((prev) => [
+                        ...prev,
+                        {
+                          status: "success",
+                          message: `Refreshed ${rows2.length} marks from server.`,
+                        },
+                      ]);
+                    } catch {
+                      logger.warn("marks_refresh_failed_after_upload");
+                    }
                   }
                 } catch (err: unknown) {
                   const msg = err instanceof Error ? err.message : String(err);
