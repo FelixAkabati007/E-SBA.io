@@ -2777,7 +2777,7 @@ export default function App() {
                   talentRemarkError ? "border-red-500" : "border-slate-300"
                 }`}
                 aria-label="Talent and interest remark"
-                aria-invalid={talentRemarkError ? "true" : "false"}
+                aria-invalid={!!talentRemarkError}
                 required
               >
                 <option value="" title="Required">

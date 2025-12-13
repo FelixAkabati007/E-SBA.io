@@ -68,6 +68,7 @@ async function main() {
           session_id SERIAL PRIMARY KEY,
           academic_year TEXT NOT NULL,
           term TEXT NOT NULL,
+          is_active BOOLEAN NOT NULL DEFAULT FALSE,
           UNIQUE(academic_year, term)
         );`
       );
@@ -118,12 +119,87 @@ async function main() {
 
     await client.query("BEGIN");
     let applied = 0;
+    const hardening: string[] = [
+      `ALTER VIEW IF EXISTS public.vw_assessment_overview SET (security_invoker = true);`,
+      `ALTER VIEW IF EXISTS public.vw_student_master SET (security_invoker = true);`,
+      `ALTER TABLE IF EXISTS public.subjects ENABLE ROW LEVEL SECURITY;`,
+      `ALTER TABLE IF EXISTS public.subjects FORCE ROW LEVEL SECURITY;`,
+      `ALTER TABLE IF EXISTS public.classes ENABLE ROW LEVEL SECURITY;`,
+      `ALTER TABLE IF EXISTS public.classes FORCE ROW LEVEL SECURITY;`,
+      `ALTER TABLE IF EXISTS public.students ENABLE ROW LEVEL SECURITY;`,
+      `ALTER TABLE IF EXISTS public.students FORCE ROW LEVEL SECURITY;`,
+      `ALTER TABLE IF EXISTS public.academic_sessions ENABLE ROW LEVEL SECURITY;`,
+      `ALTER TABLE IF EXISTS public.academic_sessions FORCE ROW LEVEL SECURITY;`,
+      `ALTER TABLE IF EXISTS public.assessments ENABLE ROW LEVEL SECURITY;`,
+      `ALTER TABLE IF EXISTS public.assessments FORCE ROW LEVEL SECURITY;`,
+      `ALTER TABLE IF EXISTS public.signatures ENABLE ROW LEVEL SECURITY;`,
+      `ALTER TABLE IF EXISTS public.signatures FORCE ROW LEVEL SECURITY;`,
+      `ALTER TABLE IF EXISTS public.audit_logs ENABLE ROW LEVEL SECURITY;`,
+      `ALTER TABLE IF EXISTS public.audit_logs FORCE ROW LEVEL SECURITY;`,
+      `ALTER TABLE IF EXISTS public.school_settings ENABLE ROW LEVEL SECURITY;`,
+      `ALTER TABLE IF EXISTS public.school_settings FORCE ROW LEVEL SECURITY;`,
+      `ALTER TABLE IF EXISTS public.grading_system ENABLE ROW LEVEL SECURITY;`,
+      `ALTER TABLE IF EXISTS public.grading_system FORCE ROW LEVEL SECURITY;`,
+      `DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'subjects' AND polname = 'subjects_select_authenticated'
+        ) THEN
+          CREATE POLICY subjects_select_authenticated ON public.subjects FOR SELECT TO authenticated USING (true);
+        END IF;
+      END $$;`,
+      `DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'classes' AND polname = 'classes_select_authenticated'
+        ) THEN
+          CREATE POLICY classes_select_authenticated ON public.classes FOR SELECT TO authenticated USING (true);
+        END IF;
+      END $$;`,
+      `DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'school_settings' AND polname = 'school_settings_select_authenticated'
+        ) THEN
+          CREATE POLICY school_settings_select_authenticated ON public.school_settings FOR SELECT TO authenticated USING (true);
+        END IF;
+      END $$;`,
+      `DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'grading_system' AND polname = 'grading_system_select_authenticated'
+        ) THEN
+          CREATE POLICY grading_system_select_authenticated ON public.grading_system FOR SELECT TO authenticated USING (true);
+        END IF;
+      END $$;`,
+      `DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'signatures' AND polname = 'signatures_select_authenticated'
+        ) THEN
+          CREATE POLICY signatures_select_authenticated ON public.signatures FOR SELECT TO authenticated USING (true);
+        END IF;
+      END $$;`,
+      `DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'academic_sessions' AND polname = 'academic_sessions_select_authenticated'
+        ) THEN
+          CREATE POLICY academic_sessions_select_authenticated ON public.academic_sessions FOR SELECT TO authenticated USING (true);
+        END IF;
+      END $$;`,
+      `CREATE INDEX IF NOT EXISTS idx_assessments_subject_session ON public.assessments(subject_id, session_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_students_status_class ON public.students(status, current_class_id);`,
+    ];
     for (const sql of statements) {
       try {
         await client.query(sql);
         applied++;
       } catch (e) {
         console.error("[schema] failed statement:\n", sql);
+        throw e;
+      }
+    }
+    for (const sql of hardening) {
+      try {
+        await client.query(sql);
+        applied++;
+      } catch (e) {
+        console.error("[schema] failed hardening:\n", sql);
         throw e;
       }
     }
