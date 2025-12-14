@@ -28,7 +28,7 @@ export function loadMarksSession(
     if (!json) return null;
     const rows = Array.isArray(json.rows) ? json.rows : [];
     const savedAt = Number(json.savedAt || 0);
-    return rows.length ? { rows, savedAt } : null;
+    return { rows, savedAt };
   } catch (e) {
     logger.warn("marks_session_load_failed", e);
     return null;

@@ -48,7 +48,11 @@ import {
   getData,
   remove,
   cleanup,
+  kvGet,
+  kvSet,
+  kvRemove,
 } from "./lib/storage";
+import { buildImportedStudents } from "./lib/masterdbImport";
 
 const MasterDBSyncControls: React.FC = () => null;
 
@@ -120,6 +124,11 @@ const SUBJECTS = [
 
 const AVAILABLE_CLASSES = ["JHS 1", "JHS 2", "JHS 3"];
 
+const LS_STUDENTS_KEY = "MasterDBStudents";
+const LS_MARKS_KEY = "MasterDBMarks";
+const LS_STUDENTS_REF = "MasterDBStudentsRef";
+const LS_MARKS_REF = "MasterDBMarksRef";
+
 type TileProps = {
   title: string;
   icon: React.ElementType;
@@ -142,6 +151,9 @@ const DashboardTile = React.memo(
           src={imageSrc}
           alt={title}
           className="w-full h-full object-cover"
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
         />
       ) : (
         <>
@@ -440,6 +452,81 @@ export default function App() {
   const [students, setStudents] = useState<Student[]>([]);
 
   const [marks, setMarks] = useState<Marks>({});
+
+  useEffect(() => {
+    const s = kvGet<Student[]>("local", LS_STUDENTS_KEY) || [];
+    const m = kvGet<Marks>("local", LS_MARKS_KEY) || {};
+    const sr = kvGet<string>("local", LS_STUDENTS_REF);
+    const mr = kvGet<string>("local", LS_MARKS_REF);
+    if (s.length > 0) setStudents(s);
+    else if (sr) {
+      getData(sr)
+        .then((v) => {
+          if (v && typeof v.data === "string") {
+            const parsed = JSON.parse(v.data) as Student[];
+            setStudents(parsed);
+          }
+        })
+        .catch(() => void 0);
+    }
+    if (Object.keys(m).length > 0) setMarks(m);
+    else if (mr) {
+      getData(mr)
+        .then((v) => {
+          if (v && typeof v.data === "string") {
+            const parsed = JSON.parse(v.data) as Marks;
+            setMarks(parsed);
+          }
+        })
+        .catch(() => void 0);
+    }
+  }, []);
+
+  useEffect(() => {
+    const payload = JSON.stringify(students);
+    if (payload.length < 4 * 1024 * 1024) {
+      kvSet("local", LS_STUDENTS_KEY, students);
+    } else {
+      const prevId = kvGet<string>("local", LS_STUDENTS_REF);
+      saveDownloadedContent(
+        undefined,
+        payload,
+        "application/json",
+        ["masterdb", "students"],
+        undefined,
+        true,
+        "MasterDBStudents.json"
+      )
+        .then(({ id }) => {
+          kvSet("local", LS_STUDENTS_REF, id);
+          if (prevId) remove(prevId).catch(() => void 0);
+        })
+        .catch(() => void 0);
+    }
+  }, [students]);
+
+  useEffect(() => {
+    const payload = JSON.stringify(marks);
+    if (payload.length < 4 * 1024 * 1024) {
+      kvSet("local", LS_MARKS_KEY, marks);
+    } else {
+      const prevId = kvGet<string>("local", LS_MARKS_REF);
+      saveDownloadedContent(
+        undefined,
+        payload,
+        "application/json",
+        ["masterdb", "marks"],
+        undefined,
+        true,
+        "MasterDBMarks.json"
+      )
+        .then(({ id }) => {
+          kvSet("local", LS_MARKS_REF, id);
+          if (prevId) remove(prevId).catch(() => void 0);
+        })
+        .catch(() => void 0);
+    }
+  }, [marks]);
 
   useEffect(() => {
     setReportId("");
@@ -782,57 +869,12 @@ export default function App() {
 
   const processImport = () => {
     if (importedPreview.length === 0) return;
-    let addedCount = 0;
-    let skippedCount = 0;
-    const newStudents: Student[] = [];
-    const yearSuffix = academicYear.substring(2, 4);
-    let currentSeq = students.length + 1;
-
-    importedPreview.forEach((row) => {
-      let newId = row["id"] || row["student id"];
-      if (!newId) {
-        newId = `JHS${yearSuffix}${currentSeq.toString().padStart(3, "0")}`;
-        currentSeq++;
-      }
-      if (
-        students.some((s) => s.id === newId) ||
-        newStudents.some((s) => s.id === newId)
-      ) {
-        skippedCount++;
-        return;
-      }
-      let genderVal: Gender = "Male";
-      const rawGender = String(row["gender"] || "").toLowerCase();
-      if (rawGender.startsWith("f")) genderVal = "Female";
-      else if (rawGender.startsWith("m")) genderVal = "Male";
-      else if (rawGender) genderVal = "Other";
-
-      const student: Student = {
-        id: String(newId),
-        surname: String(
-          row["surname"] || row["lastname"] || row["last name"] || ""
-        ).toUpperCase(),
-        firstName: String(row["firstname"] || row["first name"] || ""),
-        middleName: String(
-          row["middlename"] || row["middle name"] || row["othernames"] || ""
-        ),
-        gender: genderVal,
-        class: String(row["class"] || selectedClass),
-        status: "Active",
-        dob: String(row["dob"] || row["date of birth"] || ""),
-        guardianContact: String(
-          row["contact"] || row["guardian contact"] || row["phone"] || ""
-        ),
-      };
-
-      if (student.surname && student.firstName) {
-        newStudents.push(student);
-        addedCount++;
-      } else {
-        skippedCount++;
-      }
-    });
-
+    const { newStudents, addedCount, skippedCount } = buildImportedStudents(
+      importedPreview,
+      students,
+      selectedClass,
+      academicYear
+    );
     if (newStudents.length > 0) {
       setStudents((prev) => [...prev, ...newStudents]);
       setImportLogs((prev) => [
@@ -1452,6 +1494,8 @@ export default function App() {
       } catch {
         void 0;
       }
+      kvRemove("local", LS_STUDENTS_KEY);
+      kvRemove("local", LS_MARKS_KEY);
       setStudents([]);
       setMarks({} as Marks);
       setFormData({
@@ -1597,7 +1641,7 @@ export default function App() {
                       : subj === "Integrated Science"
                       ? "https://www.nesdis.noaa.gov/s3/2025-09/science.png"
                       : subj === "Social Studies"
-                      ? "https://lh3.googleusercontent.com/proxy/VXEzlU5A1sqCgvGXJrZdQY0Qcv54HUOqCh8gkQEdSN2STzCqsnkZm1KOYGG9F4kadmva6VY9uKaMjQwfLMCZsVyHsV11tK_qA1eqD1XnjYSMeVNXkQ"
+                      ? "https://www.championtutor.com/blog/wp-content/uploads/2023/04/Picture31.jpg"
                       : undefined
                   }
                   onClick={() => {
@@ -1863,7 +1907,27 @@ export default function App() {
   );
   const [talentRemarkOptionsGrouped, setTalentRemarkOptionsGrouped] = useState<
     Array<{ group: string; options: string[] }>
-  >([]);
+  >([
+    {
+      group: "Positive",
+      options: [
+        "Shows exceptional talent in subject activities",
+        "Consistently demonstrates creativity",
+        "Strong leadership in group tasks",
+        "Excellent problem-solving skills",
+      ],
+    },
+    {
+      group: "Improvement",
+      options: [
+        "Could benefit from additional practice",
+        "Needs support to build confidence",
+        "Should focus more during class activities",
+        "Improve time management in assignments",
+      ],
+    },
+    { group: "Other", options: ["Other"] },
+  ]);
   const [teacherRemarkOptions] = useState<string[]>([
     "Excellent attitude",
     "Consistent effort",
@@ -2546,7 +2610,127 @@ export default function App() {
     });
     if (!student)
       return (
-        <div className="p-8 text-center">No Active Students to Report</div>
+        <div className="p-8 text-center">
+          No Active Students to Report
+          <div
+            data-testid="headmaster-underscores"
+            className="text-base font-semibold mt-4"
+          >
+            {"_".repeat(100)}
+          </div>
+          <div className="mt-6 bg-white p-6 rounded-lg border border-slate-200 max-w-4xl mx-auto text-left">
+            <h3 className="text-lg font-bold text-slate-800 mb-4">
+              Grading Overview
+            </h3>
+            <div className="mt-4 text-xs text-slate-600">
+              <div className="font-semibold mb-2">Grading Scale</div>
+            </div>
+          </div>
+          <div className="mt-8 bg-white p-6 rounded-lg border border-slate-200 text-left max-w-3xl mx-auto">
+            <div className="mb-4 text-lg font-bold text-slate-800">
+              Talent and Interest:
+            </div>
+            <label htmlFor="talent-remark" className="text-slate-700">
+              Select template
+            </label>
+            <select
+              id="talent-remark"
+              value={talentRemark}
+              onChange={(e) => {
+                setTalentRemark(e.target.value);
+                const err = e.target.value ? null : "Required";
+                setTalentRemarkError(err);
+                logger.info("talent_remark_changed", {
+                  value: e.target.value,
+                });
+              }}
+              className={`w-full border rounded p-2 bg-white mb-3 ${
+                talentRemarkError ? "border-red-500" : "border-slate-300"
+              }`}
+              aria-label="Talent and interest remark"
+              aria-invalid={!!talentRemarkError}
+              required
+            >
+              <option value="" title="Required">
+                Select a template
+              </option>
+              {talentRemarkOptionsGrouped.map((g) => (
+                <optgroup key={g.group} label={g.group}>
+                  {g.options.map((opt) => (
+                    <option key={`${g.group}-${opt}`} value={opt} title={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+            {talentRemark === "Other" && (
+              <input
+                id="talent-remark-other"
+                value={talentRemarkOther}
+                onChange={(e) => {
+                  setTalentRemarkOther(e.target.value);
+                  const err =
+                    e.target.value.length >= 20
+                      ? null
+                      : "Minimum 20 characters";
+                  setTalentRemarkError(err);
+                }}
+                className={`w-full border rounded p-2 ${
+                  talentRemarkError ? "border-red-500" : "border-slate-300"
+                }`}
+                aria-label="Custom talent remark"
+                placeholder="Specify other (min 20 characters)"
+              />
+            )}
+            {!talentRemarkError && talentRemark && (
+              <p className="text-xs text-green-700">Valid</p>
+            )}
+            <label
+              htmlFor="teacher-remark"
+              className="text-slate-700 mt-6 block"
+            >
+              Select remark
+            </label>
+            <select
+              id="teacher-remark"
+              data-testid="teacher-remark-select"
+              value={teacherRemark}
+              onChange={(e) => {
+                setTeacherRemark(e.target.value);
+                setTeacherRemarkError(e.target.value ? null : "Required");
+                logger.info("teacher_remark_changed", {
+                  value: e.target.value,
+                });
+              }}
+              className="w-full border border-slate-300 rounded p-2 bg-white mb-3"
+              aria-label="Teacher remark"
+              required
+            >
+              <option value="" title="Required">
+                Select a remark
+              </option>
+              {teacherRemarkOptions.map((opt) => (
+                <option key={opt} value={opt} title={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            {teacherRemark === "Other" && (
+              <input
+                id="teacher-remark-other"
+                value={teacherRemarkOther}
+                onChange={(e) => setTeacherRemarkOther(e.target.value)}
+                className="w-full border border-slate-300 rounded p-2"
+                aria-label="Custom teacher remark"
+                placeholder="Specify other remark"
+              />
+            )}
+            {teacherRemarkError && (
+              <p className="text-xs text-red-600 mt-1">{teacherRemarkError}</p>
+            )}
+          </div>
+        </div>
       );
     return (
       <div className="max-w-4xl mx-auto space-y-6">
@@ -2860,7 +3044,12 @@ export default function App() {
             <div className="mt-8 mb-2 text-lg font-bold text-slate-800">
               Headmaster's Remarks:
             </div>
-            <div className="text-base font-semibold">{"_".repeat(100)}</div>
+            <div
+              data-testid="headmaster-underscores"
+              className="text-base font-semibold"
+            >
+              {"_".repeat(100)}
+            </div>
             <div className="mt-8 grid grid-cols-2 gap-8 text-sm">
               <div className="border-t border-slate-400 pt-2 text-center">
                 <p className="font-bold">Class Teacher's Signature</p>
@@ -3693,6 +3882,19 @@ export default function App() {
         </div>
       )}
       <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-slate-200">
+        {students.length === 0 && (
+          <div className="p-6 text-center text-slate-600">
+            <div className="text-lg font-semibold text-slate-800 mb-2">
+              No student records
+            </div>
+            <p className="text-sm">
+              Use <span className="font-medium">Import Excel</span> to load data
+              or
+              <span className="font-medium"> Add Student</span> to create a
+              record.
+            </p>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left whitespace-nowrap">
             <thead className="bg-slate-100 text-xs uppercase text-slate-600">
@@ -4067,7 +4269,7 @@ export default function App() {
         </div>
         <div className="text-xs text-slate-400">v2.5.0 | Excel-Mode</div>
       </div>
-      <main className="p-4">
+      <main className="p-4 pb-16">
         {currentView === "home" && renderHome()}
         {currentView === "subject" && renderSubjectSheet()}
         {currentView === "report" && renderReportCard()}
@@ -4075,6 +4277,28 @@ export default function App() {
         {currentView === "setup" && renderSetup()}
         {renderAssessmentUploadModal()}
       </main>
+      <footer
+        role="contentinfo"
+        className="fixed bottom-0 left-0 right-0 bg-slate-900 text-slate-300 border-t border-slate-800"
+      >
+        <div className="max-w-7xl mx-auto px-4">
+          <div className="flex flex-col sm:flex-row items-center justify-center h-12 text-xs tracking-wide">
+            <span className="font-medium">Mr. Felix Akabati</span>
+            <span className="hidden sm:inline mx-3 opacity-50">|</span>
+            <a
+              href="mailto:felixakabati007@gmail.com"
+              className="text-slate-200 hover:text-white underline-offset-2 hover:underline"
+              title="Email Mr. Felix Akabati"
+            >
+              felixakabati007@gmail.com
+            </a>
+            <span className="hidden sm:inline mx-3 opacity-50">|</span>
+            <span className="font-medium">
+              © {new Date().getFullYear()} All Rights Reserved
+            </span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

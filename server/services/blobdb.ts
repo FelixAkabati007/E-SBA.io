@@ -7,6 +7,8 @@ type Access = "public";
 const baseDir = path.join(process.cwd(), "uploads", "blobdb");
 fs.mkdirSync(baseDir, { recursive: true });
 
+let memIndex: Array<{ id: string; url?: string }> = [];
+
 function hasBlobToken(): boolean {
   return Boolean(
     process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_BLOB_RW_TOKEN
@@ -93,7 +95,11 @@ export async function listStudents(): Promise<
     id: string;
     url?: string;
   }> | null;
-  return idx?.items || [];
+  const localItems = idx?.items || [];
+  const byId = new Map<string, { id: string; url?: string }>();
+  for (const it of localItems) byId.set(it.id, it);
+  for (const it of memIndex) byId.set(it.id, it);
+  return Array.from(byId.values());
 }
 
 async function writeStudentsIndex(
@@ -115,6 +121,12 @@ export async function upsertStudent(
     existingIdx.push({ id: doc.id, url });
   }
   await writeStudentsIndex(existingIdx);
+  const mfound = memIndex.find((i) => i.id === doc.id);
+  if (mfound) {
+    mfound.url = url;
+  } else {
+    memIndex.push({ id: doc.id, url });
+  }
   return { id: doc.id, url };
 }
 
@@ -136,6 +148,7 @@ export async function deleteStudent(id: string): Promise<boolean> {
   const items = await listStudents();
   const next = items.filter((i) => i.id !== id);
   await writeStudentsIndex(next);
+  memIndex = memIndex.filter((i) => i.id !== id);
   const p = localPath(`blobdb/students/${id}.json`);
   try {
     fs.unlinkSync(p);

@@ -35,9 +35,7 @@ describe("Remarks dropdowns", () => {
     const { getByRole } = render(<App />);
     const reportBtn = getByRole("button", { name: /Report Cards/i });
     fireEvent.click(reportBtn);
-    const titles = screen.getAllByText(/Headmaster's Remarks:/);
-    const title = titles[titles.length - 1] as HTMLElement;
-    const underscoresNode = title.nextElementSibling as HTMLElement;
+    const underscoresNode = screen.getAllByTestId("headmaster-underscores")[0];
     expect(underscoresNode).toBeInTheDocument();
     const count = underscoresNode?.textContent?.match(/_/g)?.length ?? 0;
     expect(count).toBe(100);

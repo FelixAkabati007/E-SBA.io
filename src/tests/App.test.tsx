@@ -13,6 +13,22 @@ describe("App", () => {
   });
 
   it("clamps marks values to valid ranges", () => {
+    localStorage.setItem(
+      "STORAGE::MasterDBStudents",
+      JSON.stringify([
+        {
+          id: "T1",
+          surname: "TEST",
+          firstName: "Student",
+          middleName: "",
+          gender: "Other",
+          dob: "2000-01-01",
+          guardianContact: "000",
+          class: "JHS 2",
+          status: "Active",
+        },
+      ])
+    );
     render(<App />);
     fireEvent.click(screen.getByText("Mathematics"));
     const inputs = screen.getAllByRole("spinbutton");

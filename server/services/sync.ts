@@ -21,6 +21,8 @@ type ChangeIndexItem = {
   url?: string;
 };
 
+let recentChanges: ChangeIndexItem[] = [];
+
 const baseDir = path.join(process.cwd(), "uploads", "blobdb");
 fs.mkdirSync(baseDir, { recursive: true });
 
@@ -90,8 +92,18 @@ export async function listChanges(
   limit = 1000
 ): Promise<ChangeIndexItem[]> {
   const idx = readLocalJSON<{ items: ChangeIndexItem[] }>(CHANGES_INDEX_KEY);
-  const items = idx?.items || [];
-  return items.filter((i) => i.ts > since).slice(0, limit);
+  const fileItems = idx?.items || [];
+  const merged = [...fileItems, ...recentChanges];
+  const byKey = new Map<string, ChangeIndexItem>();
+  for (const it of merged) {
+    const key = `${it.id}:${it.ts}:${it.type}`;
+    byKey.set(key, it);
+  }
+  const uniq = Array.from(byKey.values());
+  return uniq
+    .filter((i) => i.ts > since)
+    .sort((a, b) => a.ts - b.ts)
+    .slice(0, limit);
 }
 
 async function appendChangeIndex(item: ChangeIndexItem): Promise<void> {
@@ -101,6 +113,8 @@ async function appendChangeIndex(item: ChangeIndexItem): Promise<void> {
   idx.items.push(item);
   await writeJSON(CHANGES_INDEX_KEY, idx);
   await setCheckpoint(item.ts);
+  recentChanges.push(item);
+  if (recentChanges.length > 200) recentChanges = recentChanges.slice(-200);
 }
 
 export async function applyChanges(changes: Change[]): Promise<{

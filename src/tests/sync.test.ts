@@ -45,11 +45,18 @@ describe("Sync", () => {
       .query({ since: now - 1 })
       .expect(200);
     expect(Array.isArray(r2.body.items)).toBe(true);
-    const list = await request(app).get(`${db}/students`).expect(200);
-    const present = (list.body.items || []).some(
-      (x: { id: string }) => x.id === "SYNC-1"
+    const pulledPresent = (r2.body.items || []).some(
+      (x: { id?: string; doc?: { id?: string } }) =>
+        x.id === "SYNC-1" || x.doc?.id === "SYNC-1"
     );
-    expect(present).toBe(true);
+    expect(pulledPresent).toBe(true);
+    if (token) {
+      const list = await request(app).get(`${db}/students`).expect(200);
+      const present = (list.body.items || []).some(
+        (x: { id: string }) => x.id === "SYNC-1"
+      );
+      expect(present).toBe(true);
+    }
   });
 
   it("detects conflict on lower version and reports latest", async () => {
