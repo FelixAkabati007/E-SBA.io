@@ -1760,6 +1760,20 @@ export default function App() {
             )}
             Download Template
           </button>
+          <button
+            onClick={exportSubjectSheetToExcel}
+            disabled={isGeneratingDoc}
+            className="flex items-center gap-2 px-3 py-2 bg-white border border-blue-200 text-blue-700 hover:bg-blue-50 rounded-lg text-sm font-medium transition-colors w-full sm:w-auto justify-center"
+            aria-label="Export to Excel"
+            title="Export to Excel"
+          >
+            {isGeneratingDoc ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <FileSpreadsheet size={16} />
+            )}
+            Export to Excel
+          </button>
           <span className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-semibold w-full sm:w-auto text-center sm:text-left mt-1 sm:mt-0">
             Auto-Save Active
           </span>
@@ -2168,6 +2182,100 @@ export default function App() {
     } finally {
       setIsGeneratingTemplate(false);
     }
+  };
+  const exportSubjectSheetToExcel = () => {
+    setIsGeneratingDoc(true);
+    setDocStatus("Preparing Excel file...");
+    setTimeout(() => {
+      try {
+        const headers = [
+          "student_id",
+          "student_name",
+          "cat1_score",
+          "cat2_score",
+          "cat3_score",
+          "cat4_score",
+          "group_work_score",
+          "project_work_score",
+          "raw_sba_total",
+          "scaled_sba",
+          "exam_score",
+          "scaled_exam",
+          "final_total",
+          "grade",
+          "remark",
+        ];
+        const rows = filteredStudents.map((s) => {
+          const m = marks[s.id]?.[activeSubject] || {
+            cat1: 0,
+            cat2: 0,
+            cat3: 0,
+            cat4: 0,
+            group: 0,
+            project: 0,
+            exam: 0,
+          };
+          const rawSBA =
+            m.cat1 + m.cat2 + m.cat3 + m.cat4 + m.group + m.project;
+          const scaledSBA = (rawSBA / 80) * schoolConfig.catWeight;
+          const scaledExam = (m.exam / 100) * schoolConfig.examWeight;
+          const final = Math.round(scaledSBA + scaledExam);
+          const g = calculateGrade(final);
+          return [
+            s.id,
+            `${s.surname}, ${s.firstName} ${s.middleName}`.trim(),
+            m.cat1,
+            m.cat2,
+            m.cat3,
+            m.cat4,
+            m.group,
+            m.project,
+            rawSBA,
+            Number(scaledSBA.toFixed(1)),
+            m.exam,
+            Number(scaledExam.toFixed(1)),
+            final,
+            g.grade,
+            g.desc,
+          ];
+        });
+        const data = [headers, ...rows];
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        for (let r = 1; r <= rows.length; r++) {
+          const sbaCell = XLSX.utils.encode_cell({ r, c: 9 });
+          const examScaledCell = XLSX.utils.encode_cell({ r, c: 11 });
+          if (ws[sbaCell]) ws[sbaCell].z = "0.0";
+          if (ws[examScaledCell]) ws[examScaledCell].z = "0.0";
+        }
+        const wb = XLSX.utils.book_new();
+        const sheetName = `${activeSubject || "Subject"}_${selectedClass}`;
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+        const wbx = wb as unknown as {
+          Workbook?: {
+            Sheets?: Array<{ Hidden?: number }>;
+            Views?: Array<Record<string, unknown>>;
+          };
+          SheetNames?: string[];
+        };
+        if (!wbx.Workbook) wbx.Workbook = { Sheets: [], Views: [] };
+        const names = Array.isArray(wbx.SheetNames)
+          ? wbx.SheetNames
+          : [sheetName];
+        wbx.Workbook.Sheets = names.map(() => ({ Hidden: 0 }));
+        wbx.Workbook.Views = [{ activeTab: 0 }];
+        const safe = (v: string) => v.replace(/[^A-Za-z0-9_-]+/g, "_");
+        const filename = `Assessment_${safe(activeSubject || "Subject")}_${safe(
+          selectedClass
+        )}_${safe(academicYear)}_${safe(term)}_${
+          new Date().toISOString().split("T")[0]
+        }.xlsx`;
+        XLSX.writeFile(wb, filename);
+        setDocStatus("Download Started");
+      } catch (e) {
+        logger.error("subject_excel_export_error", e);
+      }
+      setIsGeneratingDoc(false);
+    }, 300);
   };
 
   const renderAssessmentUploadModal = () => {
