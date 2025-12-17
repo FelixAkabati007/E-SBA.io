@@ -1294,7 +1294,11 @@ export default function App() {
           const lineLength = (colWidth - outOfWidth - 2) / 2;
 
           doc.setLineWidth(0.1);
-          (doc as any).setLineDash([], 0);
+          (
+            doc as jsPDF & {
+              setLineDash: (dash: number[], offset: number) => void;
+            }
+          ).setLineDash([], 0);
 
           // Field 1
           doc.line(col2X, y2, col2X + lineLength, y2);
@@ -1391,7 +1395,11 @@ export default function App() {
           doc.line(col3X, y3, col3X + colWidth, y3);
           y3 += 5;
           doc.line(col3X, y3, col3X + colWidth, y3);
-          (doc as any).setLineDash([], 0);
+          (
+            doc as jsPDF & {
+              setLineDash: (dash: number[], offset: number) => void;
+            }
+          ).setLineDash([], 0);
           y3 += 4;
 
           // --- Signatures (Aligned at bottom) ---
@@ -3134,7 +3142,7 @@ export default function App() {
                 talentRemarkError ? "border-red-500" : "border-slate-300"
               }`}
               aria-label="Talent and interest remark"
-              aria-invalid={!!talentRemarkError}
+              aria-invalid={talentRemarkError ? "true" : "false"}
               aria-errormessage="talent-remark-error"
               onInvalid={() => setTalentRemarkError("Required")}
               required
@@ -3496,7 +3504,7 @@ export default function App() {
                         talentRemarkError ? "border-red-500" : ""
                       }`}
                       aria-label="Talent and interest remark"
-                      aria-invalid={!!talentRemarkError}
+                      aria-invalid={talentRemarkError ? "true" : "false"}
                       aria-errormessage="talent-remark-error-report"
                       onInvalid={() => setTalentRemarkError("Required")}
                       required

@@ -9,12 +9,44 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: esba_jhs_db
+          MYSQL_USER: esba_app_user
+          MYSQL_PASSWORD: password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm ci
+          
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Initialize Database
+        run: |
+          sudo apt-get update && sudo apt-get install -y mysql-client
+          mysql -h 127.0.0.1 -u esba_app_user -ppassword esba_jhs_db < SQL/001_esba_schema.sql
+
       - run: npm run typecheck
+      
       - run: npm test -- --coverage
+        env:
+          DB_HOST: 127.0.0.1
+          DB_USER: esba_app_user
+          DB_PASS: password
+          DB_NAME: esba_jhs_db
+          PORT: 3001
+          
       - run: npm run build
