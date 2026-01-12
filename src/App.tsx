@@ -30,6 +30,7 @@ import {
   FileSpreadsheet,
   Download,
   FileIcon,
+  Lock,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
@@ -2097,10 +2098,16 @@ export default function App() {
                   <DashboardTile
                     key={subj}
                     title={subj}
-                    icon={Calculator}
-                    color="bg-blue-600"
+                    icon={user?.role === "CLASS" ? Lock : Calculator}
+                    color={
+                      user?.role === "CLASS"
+                        ? "bg-slate-400 cursor-not-allowed"
+                        : "bg-blue-600"
+                    }
                     imageSrc={
-                      subj === "Mathematics"
+                      user?.role === "CLASS"
+                        ? undefined
+                        : subj === "Mathematics"
                         ? "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTtBNVtepKT2YtCg7GODExQYE-kE7UBGS-1lA&s"
                         : subj === "English Language"
                         ? "https://edusoftlearning.com/wp-content/uploads/2018/10/Edusoft-the-English-Language-Learning-Experts-1080x540.jpg"
@@ -2111,6 +2118,12 @@ export default function App() {
                         : undefined
                     }
                     onClick={() => {
+                      if (user?.role === "CLASS") {
+                        alert(
+                          "Access Denied: Subject modules are restricted for Class Teachers."
+                        );
+                        return;
+                      }
                       setActiveSubject(subj);
                       setCurrentView("subject");
                     }}
@@ -2133,10 +2146,16 @@ export default function App() {
                   <DashboardTile
                     key={subj}
                     title={subj}
-                    icon={LayoutGrid}
-                    color="bg-emerald-600"
+                    icon={user?.role === "CLASS" ? Lock : LayoutGrid}
+                    color={
+                      user?.role === "CLASS"
+                        ? "bg-slate-400 cursor-not-allowed"
+                        : "bg-emerald-600"
+                    }
                     imageSrc={
-                      subj === "Computing"
+                      user?.role === "CLASS"
+                        ? undefined
+                        : subj === "Computing"
                         ? "https://findvectorlogo.com/wp-content/uploads/2019/11/computing-vector-logo.png"
                         : subj === "Career Technology"
                         ? "https://media.licdn.com/dms/image/v2/D4E12AQE5tslHqALWLw/article-cover_image-shrink_720_1280/article-cover_image-shrink_720_1280/0/1673452653564?e=2147483647&v=beta&t=Mv4FYS9k5cJIfRg1JyH1ZmnLkNhlbxAT7ca3j_HaUoM"
@@ -2151,6 +2170,12 @@ export default function App() {
                         : undefined
                     }
                     onClick={() => {
+                      if (user?.role === "CLASS") {
+                        alert(
+                          "Access Denied: Subject modules are restricted for Class Teachers."
+                        );
+                        return;
+                      }
                       setActiveSubject(subj);
                       setCurrentView("subject");
                     }}
