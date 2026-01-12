@@ -55,7 +55,7 @@ export function buildImportedStudents(
       gender: genderVal,
       class: String(row["class"] || selectedClass),
       status: "Active",
-      dob: String(row["dob"] || row["date of birth"] || ""),
+      dob: String(row["dob"] || row["date of birth"] || "2000-01-01"),
       guardianContact: String(
         row["contact"] || row["guardian contact"] || row["phone"] || ""
       ),

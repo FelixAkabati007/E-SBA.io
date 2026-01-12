@@ -168,32 +168,33 @@ type TileProps = {
 
 const DashboardTile = React.memo(
   ({ title, icon: Icon, color, onClick, imageSrc }: TileProps) => (
-    <button
-      onClick={onClick}
-      className={`rounded-xl shadow-sm hover:shadow-md transition-all transform hover:-translate-y-1 text-left flex flex-col justify-between h-40 overflow-hidden ${
-        imageSrc ? "bg-white border border-slate-200" : `${color} text-white`
-      }`}
-      aria-label={title}
-    >
-      {imageSrc ? (
-        <img
-          src={imageSrc}
-          alt={title}
-          className="w-full h-full object-cover"
-          loading="lazy"
-          decoding="async"
-          referrerPolicy="no-referrer"
-        />
-      ) : (
-        <>
+    <div className="flex flex-col gap-2">
+      <button
+        onClick={onClick}
+        className={`w-full rounded-xl shadow-sm hover:shadow-md transition-all transform hover:-translate-y-1 text-left flex flex-col justify-between h-40 overflow-hidden ${
+          imageSrc ? "bg-white border border-slate-200" : `${color} text-white`
+        }`}
+        aria-label={title}
+      >
+        {imageSrc ? (
+          <img
+            src={imageSrc}
+            alt={title}
+            className="w-full h-full object-cover"
+            loading="lazy"
+            decoding="async"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
           <div className="p-6">
             <Icon size={32} className="opacity-80" />
-            <span className="font-bold text-lg">{title}</span>
           </div>
-        </>
-      )}
-      <span className="sr-only">{title}</span>
-    </button>
+        )}
+      </button>
+      <span className="text-center font-bold text-sm text-slate-700 leading-tight">
+        {title}
+      </span>
+    </div>
   )
 );
 
