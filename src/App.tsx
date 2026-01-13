@@ -2757,13 +2757,20 @@ export default function App() {
               <tr>
                 <th className="px-4 py-3 w-16">ID</th>
                 <th className="px-4 py-3 w-48">Name</th>
-                <th className="px-2 py-3 text-center bg-blue-50">T1</th>
-                <th className="px-2 py-3 text-center bg-blue-50">T2</th>
-                <th className="px-2 py-3 text-center bg-blue-50">T3</th>
-                <th className="px-2 py-3 text-center bg-blue-50">T4</th>
-                <th className="px-2 py-3 text-center bg-purple-50">Grp</th>
-                <th className="px-2 py-3 text-center bg-purple-50">Proj</th>
-                <th className="px-2 py-3 text-center font-bold">Tot</th>
+                <th className="px-2 py-3 text-center bg-blue-50">Task 1</th>
+                <th className="px-2 py-3 text-center bg-blue-50">Task 2</th>
+                <th className="px-2 py-3 text-center bg-purple-50">
+                  <span className="hidden md:inline">Group Work</span>
+                  <span className="md:hidden">Grp</span>
+                </th>
+                <th className="px-2 py-3 text-center bg-purple-50">
+                  <span className="hidden md:inline">Project</span>
+                  <span className="md:hidden">Proj</span>
+                </th>
+                <th className="px-2 py-3 text-center font-bold">
+                  <span className="hidden md:inline">Total</span>
+                  <span className="md:hidden">Tot</span>
+                </th>
                 <th className="px-2 py-3 text-center font-bold bg-green-50">
                   SBA
                 </th>
@@ -2771,9 +2778,18 @@ export default function App() {
                 <th className="px-2 py-3 text-center font-bold bg-green-50">
                   50%
                 </th>
-                <th className="px-4 py-3 text-center font-black">Fin</th>
-                <th className="px-4 py-3 text-center">Grd</th>
-                <th className="px-4 py-3 text-center">Rem</th>
+                <th className="px-4 py-3 text-center font-black">
+                  <span className="hidden md:inline">Final</span>
+                  <span className="md:hidden">Fin</span>
+                </th>
+                <th className="px-4 py-3 text-center">
+                  <span className="hidden md:inline">Grade</span>
+                  <span className="md:hidden">Grd</span>
+                </th>
+                <th className="px-4 py-3 text-center">
+                  <span className="hidden md:inline">Remark</span>
+                  <span className="md:hidden">Rem</span>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
@@ -2801,7 +2817,7 @@ export default function App() {
                     <td className="px-4 py-3 font-medium">
                       {student.surname}, {student.firstName}
                     </td>
-                    {["cat1", "cat2", "cat3", "cat4"].map((f) => (
+                    {["cat1", "cat2"].map((f) => (
                       <td key={f} className="p-1">
                         <input
                           type="number"
