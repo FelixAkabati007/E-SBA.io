@@ -22,6 +22,8 @@ export function buildImportedStudents(
   academicYear: string
 ): { newStudents: Student[]; addedCount: number; skippedCount: number } {
   const newStudents: Student[] = [];
+  const existingIds = new Set(existingStudents.map((s) => s.id));
+  const newIds = new Set<string>();
   const yearSuffix = academicYear.substring(2, 4);
   let currentSeq = existingStudents.length + 1;
   let addedCount = 0;
@@ -36,10 +38,7 @@ export function buildImportedStudents(
       currentSeq++;
     }
 
-    if (
-      existingStudents.some((s) => s.id === newId) ||
-      newStudents.some((s) => s.id === newId)
-    ) {
+    if (existingIds.has(newId) || newIds.has(newId)) {
       skippedCount++;
       return;
     }
@@ -74,6 +73,7 @@ export function buildImportedStudents(
     };
     if (student.surname && student.firstName) {
       newStudents.push(student);
+      newIds.add(newId);
       addedCount++;
     } else {
       skippedCount++;
