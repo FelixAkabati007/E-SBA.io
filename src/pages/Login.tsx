@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { apiClient } from "../lib/apiClient";
-import { Lock, User, Loader2, AlertCircle } from "lucide-react";
+import { Lock, User as UserIcon, Loader2, AlertCircle } from "lucide-react";
+import type { User as AuthUser } from "../context/AuthContext";
 
 const Login: React.FC = () => {
   const { login } = useAuth();
@@ -18,19 +19,10 @@ const Login: React.FC = () => {
     try {
       const data = await apiClient.request<{
         token: string;
-        user: {
-          id: number;
-          username: string;
-          fullName: string;
-          role: string;
-          assignedClassId: number | null;
-          assignedClassName: string | null;
-          assignedSubjectId: number | null;
-          assignedSubjectName: string | null;
-        };
+        user: AuthUser;
       }>("/auth/login", "POST", { username, password });
 
-      login(data.token, data.user as any);
+      login(data.token, data.user);
     } catch (err) {
       console.error("Login error:", err);
       setError((err as Error).message);
@@ -69,7 +61,7 @@ const Login: React.FC = () => {
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <User className="h-5 w-5 text-slate-400" />
+                  <UserIcon className="h-5 w-5 text-slate-400" />
                 </div>
                 <input
                   type="text"

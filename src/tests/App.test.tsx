@@ -27,8 +27,8 @@ describe("App", () => {
     vi.clearAllMocks();
 
     // Mock global fetch for ProgressBar
-    global.fetch = vi.fn().mockImplementation((url) => {
-      if (typeof url === "string" && url.includes("/api/config/academic")) {
+    global.fetch = vi.fn().mockImplementation((_url) => {
+      if (typeof _url === "string" && _url.includes("/api/config/academic")) {
         return Promise.resolve({
           ok: true,
           json: async () => ({
@@ -37,7 +37,7 @@ describe("App", () => {
           }),
         });
       }
-      if (typeof url === "string" && url.includes("/api/config/school")) {
+      if (typeof _url === "string" && _url.includes("/api/config/school")) {
         return Promise.resolve({
           ok: true,
           json: async () => ({
@@ -53,7 +53,7 @@ describe("App", () => {
           }),
         });
       }
-      if (typeof url === "string" && url.includes("/api/progress")) {
+      if (typeof _url === "string" && _url.includes("/api/progress")) {
         return Promise.resolve({
           ok: true,
           json: async () => ({
@@ -76,7 +76,7 @@ describe("App", () => {
   });
 
   it("renders header and navigates to Subject view", async () => {
-    (apiClient.getStudents as any).mockResolvedValue([
+    vi.mocked(apiClient.getStudents).mockResolvedValue([
       {
         id: "S1",
         surname: "Test",
@@ -85,7 +85,7 @@ describe("App", () => {
         status: "Active",
       },
     ]);
-    (apiClient.request as any).mockResolvedValue({
+    vi.mocked(apiClient.request).mockResolvedValue({
       user: {
         role: "HEAD",
         fullName: "Test User",
@@ -94,8 +94,8 @@ describe("App", () => {
         assignedSubjectName: null,
       },
     });
-    (apiClient.getSubjectSheet as any).mockResolvedValue({ rows: [] });
-    (apiClient.getTalentRemarks as any).mockResolvedValue({ groups: [] });
+    vi.mocked(apiClient.getSubjectSheet).mockResolvedValue({ rows: [] });
+    vi.mocked(apiClient.getTalentRemarks).mockResolvedValue({ groups: [] });
 
     render(
       <AuthProvider>
@@ -122,20 +122,16 @@ describe("App", () => {
   });
 
   it("clamps marks values to valid ranges", async () => {
-    (apiClient.getStudents as any).mockResolvedValue([
+    vi.mocked(apiClient.getStudents).mockResolvedValue([
       {
         id: "T1",
         surname: "TEST",
         firstName: "Student",
-        middleName: "",
-        gender: "Other",
-        dob: "2000-01-01",
-        guardianContact: "000",
         class: "JHS 2(A)",
         status: "Active",
       },
     ]);
-    (apiClient.request as any).mockResolvedValue({
+    vi.mocked(apiClient.request).mockResolvedValue({
       user: {
         role: "HEAD",
         fullName: "Test User",
@@ -144,8 +140,8 @@ describe("App", () => {
         assignedSubjectName: null,
       },
     });
-    (apiClient.getSubjectSheet as any).mockResolvedValue({ rows: [] });
-    (apiClient.getTalentRemarks as any).mockResolvedValue({ groups: [] });
+    vi.mocked(apiClient.getSubjectSheet).mockResolvedValue({ rows: [] });
+    vi.mocked(apiClient.getTalentRemarks).mockResolvedValue({ groups: [] });
 
     render(
       <AuthProvider>

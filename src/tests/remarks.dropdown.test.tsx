@@ -23,14 +23,14 @@ describe("Remarks dropdowns", () => {
     localStorage.setItem("token", "fake-token");
 
     // Mock global fetch to avoid "Invalid URL" errors
-    global.fetch = vi.fn().mockImplementation((url) => {
+    global.fetch = vi.fn().mockImplementation((_url) => {
       return Promise.resolve({
         ok: true,
         json: async () => ({}),
       });
     });
 
-    (apiClient.request as any).mockResolvedValue({
+    vi.mocked(apiClient.request).mockResolvedValue({
       user: {
         id: 1,
         username: "head",
@@ -38,12 +38,12 @@ describe("Remarks dropdowns", () => {
         role: "HEAD",
       },
     });
-    (apiClient.getStudents as any).mockResolvedValue([]);
-    (apiClient.getTalentRemarks as any).mockResolvedValue({ groups: [] });
+    vi.mocked(apiClient.getStudents).mockResolvedValue([]);
+    vi.mocked(apiClient.getTalentRemarks).mockResolvedValue({ groups: [] });
   });
 
   it("Talent remark is required and shows error when empty", async () => {
-    const { getByRole, getByLabelText, findByRole } = render(
+    const { getByLabelText, findByRole } = render(
       <AuthProvider>
         <App />
       </AuthProvider>
@@ -70,7 +70,7 @@ describe("Remarks dropdowns", () => {
   });
 
   it("Talent remark Other enforces 20+ characters", async () => {
-    const { getByRole, getByLabelText, findByRole } = render(
+    const { getByLabelText, findByRole } = render(
       <AuthProvider>
         <App />
       </AuthProvider>
@@ -90,7 +90,7 @@ describe("Remarks dropdowns", () => {
   });
 
   it("Headmaster's Remarks line renders 100 underscores", async () => {
-    const { getByRole, findByRole } = render(
+    const { findByRole } = render(
       <AuthProvider>
         <App />
       </AuthProvider>

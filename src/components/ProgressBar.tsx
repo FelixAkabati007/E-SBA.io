@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Loader2, AlertCircle, CheckCircle } from "lucide-react";
-import { useAuth } from "../context/AuthContext";
+import { AlertCircle, CheckCircle } from "lucide-react";
 
 interface ProgressProps {
   scope: "subject" | "class";
@@ -24,9 +23,7 @@ const ProgressBar: React.FC<ProgressProps> = ({
   academicYear,
   term,
 }) => {
-  const { user } = useAuth();
   const [data, setData] = useState<ProgressData | null>(null);
-  const [loading, setLoading] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
   const fetchProgress = async (signal?: AbortSignal) => {
@@ -68,12 +65,6 @@ const ProgressBar: React.FC<ProgressProps> = ({
 
     // Poll every 30 seconds
     const timer = setInterval(() => {
-      // Create new controller for each poll if needed, or just ignore signal for intervals?
-      // Actually, interval fetches can also be aborted on unmount.
-      // But we can't pass the *same* signal to multiple fetches if one is aborted?
-      // Wait, the signal is for the *current* fetch.
-      // If we unmount, we want to abort *any* pending fetch.
-      // So we should use one controller for the effect lifecycle.
       fetchProgress(controller.signal);
     }, 30000);
 
@@ -99,16 +90,13 @@ const ProgressBar: React.FC<ProgressProps> = ({
           {scope === "subject"
             ? `${subjectName} Progress`
             : "Class Reports Progress"}
-          {loading && (
-            <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
-          )}
         </h3>
         <span className="text-sm font-medium text-slate-600">
           {data.completed} / {data.total} Students ({data.progress}%)
         </span>
       </div>
 
-      <div className="w-full bg-slate-100 rounded-full h-3 mb-2">
+      <div className="w-full bg-slate-100 rounded-full h-3 mb-2 overflow-hidden">
         <div
           className={`h-3 rounded-full transition-all duration-500 ${getColor(
             data.progress

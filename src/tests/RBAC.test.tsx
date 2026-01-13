@@ -1,11 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  render,
-  screen,
-  waitFor,
-  cleanup,
-  fireEvent,
-} from "@testing-library/react";
+import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import "@testing-library/jest-dom";
 import App from "../App";
 import { AuthProvider } from "../context/AuthContext";
 import { apiClient } from "../lib/apiClient";
@@ -27,8 +22,8 @@ describe("RBAC Progress Bars", () => {
     vi.clearAllMocks();
 
     // Mock global fetch for ProgressBar
-    global.fetch = vi.fn().mockImplementation((url) => {
-      if (typeof url === "string" && url.includes("/api/config/academic")) {
+    global.fetch = vi.fn().mockImplementation((_url) => {
+      if (typeof _url === "string" && _url.includes("/api/config/academic")) {
         return Promise.resolve({
           ok: true,
           json: async () => ({
@@ -37,7 +32,7 @@ describe("RBAC Progress Bars", () => {
           }),
         });
       }
-      if (typeof url === "string" && url.includes("/api/config/school")) {
+      if (typeof _url === "string" && _url.includes("/api/config/school")) {
         return Promise.resolve({
           ok: true,
           json: async () => ({
@@ -65,8 +60,8 @@ describe("RBAC Progress Bars", () => {
   });
 
   it("shows only assigned subject progress for SUBJECT teacher", async () => {
-    (apiClient.getStudents as any).mockResolvedValue([]);
-    (apiClient.request as any).mockResolvedValue({
+    vi.mocked(apiClient.getStudents).mockResolvedValue([]);
+    vi.mocked(apiClient.request).mockResolvedValue({
       user: {
         role: "SUBJECT",
         fullName: "Math Teacher",
@@ -75,7 +70,7 @@ describe("RBAC Progress Bars", () => {
         assignedSubjectName: "Mathematics",
       },
     });
-    (apiClient.getSubjectSheet as any).mockResolvedValue({ rows: [] });
+    vi.mocked(apiClient.getSubjectSheet).mockResolvedValue({ rows: [] });
 
     render(
       <AuthProvider>
@@ -92,37 +87,46 @@ describe("RBAC Progress Bars", () => {
       expect(screen.getByText(/Assessment Progress/)).toBeInTheDocument();
     });
 
-    // Mathematics should be visible (as a progress bar label)
-    // Note: The main tiles also have "Mathematics", but we want to check the progress section specifically.
-    // The progress section is rendered as:
-    // <span className="font-medium">{SUBJECT_DISPLAY_NAMES[subj]}</span>
-    // <span className="font-bold ...">0%</span>
-
-    // We can look for the "0%" next to Mathematics, but that's tricky.
-    // However, if we look for ALL occurrences of "Mathematics", we should find it.
-    // If we look for "English Language", it should NOT be present in the progress section.
-
-    // Since the main tiles are also filtered (hopefully, from previous tasks), checking for English Language absence is good.
-    // But let's check the progress bar specifically.
-    // The progress bar container has class "bg-slate-50 p-3 rounded-md border border-slate-100"
-
-    // Let's rely on text content for now.
-
-    // "Mathematics" should be present.
+    // Mathematics should be visible
     expect(screen.getAllByText("Mathematics").length).toBeGreaterThan(0);
 
-    // "English Language" should NOT be present in the document at all if tiles are also filtered.
-    // If tiles are NOT filtered for SUBJECT teacher (which they should be), then this test might fail if I didn't filter tiles.
-    // But the user request specifically mentioned "Assessment Progress bar".
-
-    // Let's verify if "English Language" is present.
+    // English Language should NOT be present
     const englishElements = screen.queryAllByText("English Language");
     expect(englishElements.length).toBe(0);
   });
 
+  it("shows only assigned class progress for CLASS teacher", async () => {
+    vi.mocked(apiClient.getStudents).mockResolvedValue([]);
+    vi.mocked(apiClient.request).mockResolvedValue({
+      user: {
+        role: "CLASS",
+        fullName: "Class Teacher",
+        username: "classuser",
+        assignedClassName: "JHS 1(A)",
+        assignedSubjectName: null,
+      },
+    });
+    vi.mocked(apiClient.getSubjectSheet).mockResolvedValue({ rows: [] });
+
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Welcome, Class Teacher")).toBeInTheDocument();
+    });
+
+    // Should see assessment progress
+    await waitFor(() => {
+      expect(screen.getByText(/Assessment Progress/)).toBeInTheDocument();
+    });
+  });
+
   it("shows all subjects for HEAD teacher", async () => {
-    (apiClient.getStudents as any).mockResolvedValue([]);
-    (apiClient.request as any).mockResolvedValue({
+    vi.mocked(apiClient.getStudents).mockResolvedValue([]);
+    vi.mocked(apiClient.request).mockResolvedValue({
       user: {
         role: "HEAD",
         fullName: "Head Teacher",

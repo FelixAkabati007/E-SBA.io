@@ -29,14 +29,14 @@ async function verifyStudentAccess(req: AuthRequest, studentId: string) {
   return false;
 }
 
-router.post("/talent", async (req: any, res) => {
+router.post("/talent", async (req: express.Request, res: express.Response) => {
   try {
     const { studentId, academicYear, term, talent, teacher, head } = req.body;
     if (!studentId || !academicYear || !term) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    if (!(await verifyStudentAccess(req, studentId))) {
+    if (!(await verifyStudentAccess(req as AuthRequest, studentId))) {
       return res.status(403).json({ error: "Access denied to this student" });
     }
 
@@ -45,7 +45,7 @@ router.post("/talent", async (req: any, res) => {
       academicYear,
       term,
       { talent, teacher, head },
-      req.user?.id
+      (req as AuthRequest).user?.id
     );
     res.json({ ok: true });
   } catch (e) {
@@ -53,14 +53,14 @@ router.post("/talent", async (req: any, res) => {
   }
 });
 
-router.get("/talent", async (req: any, res) => {
+router.get("/talent", async (req: express.Request, res: express.Response) => {
   try {
     const { studentId, academicYear, term } = req.query;
     if (!studentId || !academicYear || !term) {
       return res.status(400).json({ error: "Missing required parameters" });
     }
 
-    if (!(await verifyStudentAccess(req, String(studentId)))) {
+    if (!(await verifyStudentAccess(req as AuthRequest, String(studentId)))) {
       return res.status(403).json({ error: "Access denied to this student" });
     }
 
@@ -75,53 +75,59 @@ router.get("/talent", async (req: any, res) => {
   }
 });
 
-router.post("/attendance", async (req: any, res) => {
-  try {
-    const { studentId, academicYear, term, present, total } = req.body;
-    if (!studentId || !academicYear || !term) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
+router.post(
+  "/attendance",
+  async (req: express.Request, res: express.Response) => {
+    try {
+      const { studentId, academicYear, term, present, total } = req.body;
+      if (!studentId || !academicYear || !term) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
 
-    if (!(await verifyStudentAccess(req, studentId))) {
-      return res.status(403).json({ error: "Access denied to this student" });
-    }
+      if (!(await verifyStudentAccess(req as AuthRequest, studentId))) {
+        return res.status(403).json({ error: "Access denied to this student" });
+      }
 
-    await saveAttendance(
-      studentId,
-      academicYear,
-      term,
-      Number(present),
-      Number(total)
-    );
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: (e as Error).message });
+      await saveAttendance(
+        studentId,
+        academicYear,
+        term,
+        Number(present),
+        Number(total)
+      );
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
   }
-});
+);
 
-router.get("/attendance", async (req: any, res) => {
-  try {
-    const { studentId, academicYear, term } = req.query;
-    if (!studentId || !academicYear || !term) {
-      return res.status(400).json({ error: "Missing required parameters" });
+router.get(
+  "/attendance",
+  async (req: express.Request, res: express.Response) => {
+    try {
+      const { studentId, academicYear, term } = req.query;
+      if (!studentId || !academicYear || !term) {
+        return res.status(400).json({ error: "Missing required parameters" });
+      }
+
+      if (!(await verifyStudentAccess(req as AuthRequest, String(studentId)))) {
+        return res.status(403).json({ error: "Access denied to this student" });
+      }
+
+      const data = await getAttendance(
+        String(studentId),
+        String(academicYear),
+        String(term)
+      );
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
     }
-
-    if (!(await verifyStudentAccess(req, String(studentId)))) {
-      return res.status(403).json({ error: "Access denied to this student" });
-    }
-
-    const data = await getAttendance(
-      String(studentId),
-      String(academicYear),
-      String(term)
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(500).json({ error: (e as Error).message });
   }
-});
+);
 
-router.get("/rankings", async (req: any, res) => {
+router.get("/rankings", async (req: express.Request, res: express.Response) => {
   try {
     const { class: baseClass, academicYear, term, page, limit } = req.query;
 
@@ -130,7 +136,7 @@ router.get("/rankings", async (req: any, res) => {
     }
 
     // Role check: Only HEAD should access full rankings
-    const user = req.user!;
+    const user = (req as AuthRequest).user!;
     if (user.role !== "HEAD") {
       return res
         .status(403)

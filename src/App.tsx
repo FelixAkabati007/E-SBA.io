@@ -35,7 +35,7 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
-import "jspdf-autotable";
+import autoTable from "jspdf-autotable";
 import { logger } from "./lib/logger";
 import { apiClient } from "./lib/apiClient";
 import {
@@ -206,10 +206,23 @@ export default function App() {
   const [currentView, setCurrentView] = useState("home");
 
   // Ranking Report State
-  const [rankingData, setRankingData] = useState<{
-    data: any[];
+  interface RankingRow {
+    student_id: string;
+    position: number;
+    surname: string;
+    first_name: string;
+    middle_name: string;
+    class_name: string;
+    overall_score: number;
+  }
+  interface RankingData {
+    data: RankingRow[];
     total: number;
-  }>({ data: [], total: 0 });
+  }
+  const [rankingData, setRankingData] = useState<RankingData>({
+    data: [],
+    total: 0,
+  });
   const [rankingPage, setRankingPage] = useState(1);
   const [rankingLoading, setRankingLoading] = useState(false);
   const [rankingClassFilter, setRankingClassFilter] = useState("JHS 1");
@@ -260,10 +273,10 @@ export default function App() {
       );
 
       // Table
-      (doc as any).autoTable({
+      autoTable(doc, {
         startY: 50,
         head: [["Rank", "Student Name", "Class", "Overall Score"]],
-        body: allData.data.map((s) => [
+        body: allData.data.map((s: RankingRow) => [
           s.position,
           `${s.surname}, ${s.first_name} ${s.middle_name}`,
           s.class_name,
@@ -645,14 +658,6 @@ export default function App() {
   }, [reportDataLoaded]);
 
   const hasTalentChanges = useMemo(() => {
-    const currentTalent =
-      talentRemark === "Other" ? talentRemarkOther : talentRemark;
-    const currentTeacher =
-      teacherRemark === "Other" ? teacherRemarkOther : teacherRemark;
-    // Simple comparison - this might need refinement if "Other" logic is complex
-    // But for now, we just track if the main state changed from what we loaded
-    // Note: This simple check assumes loaded values are correctly mapped to state
-    // We'll rely on the user explicitly clicking Save/Cancel
     return (
       talentRemark !== originalTalent.talent ||
       teacherRemark !== originalTalent.teacher ||
@@ -2138,6 +2143,7 @@ export default function App() {
                 setRankingPage(1);
               }}
               className="p-2 border border-slate-300 rounded-md bg-slate-50"
+              title="Filter by Class"
             >
               <option value="JHS 1">JHS 1 (All Streams)</option>
               <option value="JHS 2">JHS 2 (All Streams)</option>
@@ -5631,6 +5637,7 @@ export default function App() {
         {currentView === "report" && renderReportCard()}
         {currentView === "masterdb" && renderMasterDB()}
         {currentView === "setup" && renderSetup()}
+        {currentView === "ranking" && renderRankingReport()}
         {renderAssessmentUploadModal()}
       </main>
       <footer

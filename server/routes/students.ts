@@ -4,34 +4,44 @@ import {
   upsertStudent,
   deleteStudent,
 } from "../services/students";
-import { authenticateToken, requireRole } from "../middleware/auth";
+import {
+  authenticateToken,
+  requireRole,
+  AuthRequest,
+} from "../middleware/auth";
 
 const router = express.Router();
 
-router.get("/", authenticateToken, async (req: any, res) => {
-  try {
-    const user = req.user;
-    let filterClass: string | undefined;
+router.get(
+  "/",
+  authenticateToken,
+  async (req: express.Request, res: express.Response) => {
+    try {
+      const user = (req as AuthRequest).user!;
+      let filterClass: string | undefined;
 
-    if (user.role === "CLASS") {
-      filterClass = user.assignedClassName;
-      if (!filterClass) {
-        // Should not happen if seeded correctly, but safety check
-        return res.status(403).json({ error: "No class assigned to teacher" });
+      if (user.role === "CLASS") {
+        filterClass = user.assignedClassName || undefined;
+        if (!filterClass) {
+          // Should not happen if seeded correctly, but safety check
+          return res
+            .status(403)
+            .json({ error: "No class assigned to teacher" });
+        }
+      } else if (user.role === "HEAD") {
+        // Optional filter for HEAD
+        if (typeof req.query.class === "string") {
+          filterClass = req.query.class;
+        }
       }
-    } else if (user.role === "HEAD") {
-      // Optional filter for HEAD
-      if (typeof req.query.class === "string") {
-        filterClass = req.query.class;
-      }
+
+      const students = await getAllStudents(filterClass);
+      res.json(students);
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
     }
-
-    const students = await getAllStudents(filterClass);
-    res.json(students);
-  } catch (e) {
-    res.status(500).json({ error: (e as Error).message });
   }
-});
+);
 
 router.post("/", authenticateToken, requireRole(["HEAD"]), async (req, res) => {
   try {
