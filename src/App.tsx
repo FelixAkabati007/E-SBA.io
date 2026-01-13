@@ -219,18 +219,20 @@ export default function App() {
     data: RankingRow[];
     total: number;
   }
-  const [rankingData, setRankingData] = useState<RankingData>({
+  const [rankingData, setRankingData] = useState<RankingData | RankingRow[]>({
     data: [],
     total: 0,
   });
   const [rankingPage, setRankingPage] = useState(1);
   const [rankingLoading, setRankingLoading] = useState(false);
   const [rankingClassFilter, setRankingClassFilter] = useState("JHS 1");
+  const [rankingError, setRankingError] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
 
   const fetchRankings = async () => {
     setRankingLoading(true);
     try {
+      setRankingError(null);
       const res = await apiClient.getRankings(
         rankingClassFilter,
         academicYear,
@@ -240,7 +242,8 @@ export default function App() {
       );
       setRankingData(res);
     } catch (e) {
-      console.error(e);
+      const msg = (e as Error).message || "Failed to load rankings";
+      setRankingError(msg);
     } finally {
       setRankingLoading(false);
     }
@@ -289,8 +292,12 @@ export default function App() {
 
       doc.save(`Ranking_Report_${rankingClassFilter.replace(/ /g, "_")}.pdf`);
     } catch (e) {
-      console.error("Download failed:", e);
-      alert("Failed to generate PDF report.");
+      const msg = (e as Error).message || "Failed to generate PDF report.";
+      alert(
+        msg.includes("Access denied")
+          ? "Access denied. Please sign in as Head Teacher."
+          : "Failed to generate PDF report."
+      );
     }
   };
 
@@ -2113,149 +2120,170 @@ export default function App() {
     );
   };
 
-  const renderRankingReport = () => (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => setCurrentView("home")}
-              className="p-2 hover:bg-slate-100 rounded-full transition-colors"
-              title="Back to Dashboard"
-            >
-              <ArrowLeft size={24} className="text-slate-600" />
-            </button>
-            <div>
-              <h2 className="text-2xl font-bold text-slate-800">
-                Student Ranking Report
-              </h2>
-              <p className="text-slate-500 text-sm">
-                Comprehensive performance analysis across streams
-              </p>
+  const renderRankingReport = () => {
+    const raw = rankingData as unknown;
+    const rows: RankingRow[] = Array.isArray(raw)
+      ? (raw as RankingRow[])
+      : Array.isArray((raw as { data?: RankingRow[] }).data)
+      ? ((raw as { data?: RankingRow[] }).data as RankingRow[])
+      : [];
+    const total =
+      typeof (raw as { total?: number }).total === "number"
+        ? (raw as { total: number }).total
+        : rows.length;
+
+    return (
+      <div className="space-y-6 animate-in fade-in duration-500">
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => setCurrentView("home")}
+                className="p-2 hover:bg-slate-100 rounded-full transition-colors"
+                title="Back to Dashboard"
+              >
+                <ArrowLeft size={24} className="text-slate-600" />
+              </button>
+              <div>
+                <h2 className="text-2xl font-bold text-slate-800">
+                  Student Ranking Report
+                </h2>
+                <p className="text-slate-500 text-sm">
+                  Comprehensive performance analysis across streams
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-4">
+              <select
+                value={rankingClassFilter}
+                onChange={(e) => {
+                  setRankingClassFilter(e.target.value);
+                  setRankingPage(1);
+                }}
+                className="p-2 border border-slate-300 rounded-md bg-slate-50"
+                title="Filter by Class"
+              >
+                <option value="JHS 1">JHS 1 (All Streams)</option>
+                <option value="JHS 2">JHS 2 (All Streams)</option>
+                <option value="JHS 3">JHS 3 (All Streams)</option>
+              </select>
+              <button
+                onClick={downloadRankingReport}
+                className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors"
+              >
+                <Download size={18} /> Download PDF
+              </button>
+              <button
+                onClick={() => window.print()}
+                className="flex items-center gap-2 bg-slate-800 text-white px-4 py-2 rounded-lg hover:bg-slate-900 transition-colors"
+              >
+                <Printer size={18} /> Print Report
+              </button>
             </div>
           </div>
 
-          <div className="flex gap-4">
-            <select
-              value={rankingClassFilter}
-              onChange={(e) => {
-                setRankingClassFilter(e.target.value);
-                setRankingPage(1);
-              }}
-              className="p-2 border border-slate-300 rounded-md bg-slate-50"
-              title="Filter by Class"
-            >
-              <option value="JHS 1">JHS 1 (All Streams)</option>
-              <option value="JHS 2">JHS 2 (All Streams)</option>
-              <option value="JHS 3">JHS 3 (All Streams)</option>
-            </select>
-            <button
-              onClick={downloadRankingReport}
-              className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors"
-            >
-              <Download size={18} /> Download PDF
-            </button>
-            <button
-              onClick={() => window.print()}
-              className="flex items-center gap-2 bg-slate-800 text-white px-4 py-2 rounded-lg hover:bg-slate-900 transition-colors"
-            >
-              <Printer size={18} /> Print Report
-            </button>
-          </div>
-        </div>
+          {rankingError && (
+            <div className="mb-4 p-3 rounded-md bg-red-50 text-red-700 text-sm border border-red-100">
+              {rankingError.includes("Access denied")
+                ? "Access denied. Only Head Teacher accounts can view rankings."
+                : rankingError}
+            </div>
+          )}
 
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="p-3 text-left font-semibold text-slate-700">
-                  Rank
-                </th>
-                <th className="p-3 text-left font-semibold text-slate-700">
-                  Student Name
-                </th>
-                <th className="p-3 text-left font-semibold text-slate-700">
-                  Class
-                </th>
-                <th className="p-3 text-right font-semibold text-slate-700">
-                  Overall Score
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rankingLoading ? (
-                <tr>
-                  <td colSpan={4} className="p-8 text-center text-slate-500">
-                    Loading rankings...
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200">
+                  <th className="p-3 text-left font-semibold text-slate-700">
+                    Rank
+                  </th>
+                  <th className="p-3 text-left font-semibold text-slate-700">
+                    Student Name
+                  </th>
+                  <th className="p-3 text-left font-semibold text-slate-700">
+                    Class
+                  </th>
+                  <th className="p-3 text-right font-semibold text-slate-700">
+                    Overall Score
+                  </th>
                 </tr>
-              ) : rankingData.data.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="p-8 text-center text-slate-500">
-                    No data found for this selection.
-                  </td>
-                </tr>
-              ) : (
-                rankingData.data.map((student) => (
-                  <tr
-                    key={student.student_id}
-                    className="border-b border-slate-100 hover:bg-slate-50"
-                  >
-                    <td className="p-3">
-                      <div
-                        className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
-                          student.position === 1
-                            ? "bg-yellow-100 text-yellow-700"
-                            : student.position === 2
-                            ? "bg-slate-200 text-slate-700"
-                            : student.position === 3
-                            ? "bg-orange-100 text-orange-700"
-                            : "bg-slate-50 text-slate-600"
-                        }`}
-                      >
-                        {student.position}
-                      </div>
-                    </td>
-                    <td className="p-3 font-medium text-slate-800">
-                      {student.surname}, {student.first_name}{" "}
-                      {student.middle_name}
-                    </td>
-                    <td className="p-3 text-slate-600">{student.class_name}</td>
-                    <td className="p-3 text-right font-mono font-medium text-slate-700">
-                      {student.overall_score.toFixed(2)}
+              </thead>
+              <tbody>
+                {rankingLoading ? (
+                  <tr>
+                    <td colSpan={4} className="p-8 text-center text-slate-500">
+                      Loading rankings...
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ) : rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="p-8 text-center text-slate-500">
+                      No data found for this selection.
+                    </td>
+                  </tr>
+                ) : (
+                  rows.map((student) => (
+                    <tr
+                      key={student.student_id}
+                      className="border-b border-slate-100 hover:bg-slate-50"
+                    >
+                      <td className="p-3">
+                        <div
+                          className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
+                            student.position === 1
+                              ? "bg-yellow-100 text-yellow-700"
+                              : student.position === 2
+                              ? "bg-slate-200 text-slate-700"
+                              : student.position === 3
+                              ? "bg-orange-100 text-orange-700"
+                              : "bg-slate-50 text-slate-600"
+                          }`}
+                        >
+                          {student.position}
+                        </div>
+                      </td>
+                      <td className="p-3 font-medium text-slate-800">
+                        {student.surname}, {student.first_name}{" "}
+                        {student.middle_name}
+                      </td>
+                      <td className="p-3 text-slate-600">
+                        {student.class_name}
+                      </td>
+                      <td className="p-3 text-right font-mono font-medium text-slate-700">
+                        {student.overall_score.toFixed(2)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
 
-        <div className="flex justify-between items-center mt-4">
-          <span className="text-sm text-slate-500">
-            Showing {(rankingPage - 1) * 50 + 1} to{" "}
-            {Math.min(rankingPage * 50, rankingData.total)} of{" "}
-            {rankingData.total} students
-          </span>
-          <div className="flex gap-2">
-            <button
-              disabled={rankingPage === 1}
-              onClick={() => setRankingPage((p) => p - 1)}
-              className="px-3 py-1 border border-slate-300 rounded disabled:opacity-50"
-            >
-              Previous
-            </button>
-            <button
-              disabled={rankingPage * 50 >= rankingData.total}
-              onClick={() => setRankingPage((p) => p + 1)}
-              className="px-3 py-1 border border-slate-300 rounded disabled:opacity-50"
-            >
-              Next
-            </button>
+          <div className="flex justify-between items-center mt-4">
+            <span className="text-sm text-slate-500">
+              Showing {(rankingPage - 1) * 50 + 1} to{" "}
+              {Math.min(rankingPage * 50, total)} of {total} students
+            </span>
+            <div className="flex gap-2">
+              <button
+                disabled={rankingPage === 1}
+                onClick={() => setRankingPage((p) => p - 1)}
+                className="px-3 py-1 border border-slate-300 rounded disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                disabled={rankingPage * 50 >= total}
+                onClick={() => setRankingPage((p) => p + 1)}
+                className="px-3 py-1 border border-slate-300 rounded disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
           </div>
         </div>
-      </div>
-      <style>{`
+        <style>{`
          @media print {
            body * {
              visibility: hidden;
@@ -2275,8 +2303,9 @@ export default function App() {
            }
          }
        `}</style>
-    </div>
-  );
+      </div>
+    );
+  };
 
   const renderHome = () => (
     <div className="space-y-6 animate-in fade-in duration-500">

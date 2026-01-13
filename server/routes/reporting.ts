@@ -45,7 +45,7 @@ router.post("/talent", async (req: express.Request, res: express.Response) => {
       academicYear,
       term,
       { talent, teacher, head },
-      (req as AuthRequest).user?.id
+      (req as AuthRequest).user?.userId
     );
     res.json({ ok: true });
   } catch (e) {
