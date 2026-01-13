@@ -5325,7 +5325,14 @@ export default function App() {
             </button>
           )}
           <Menu size={24} className="opacity-80" />
-          <h1 className="text-xl font-bold tracking-wide">E-SBA [JHS]</h1>
+          <div className="flex items-center gap-2">
+            <img
+              src="/logo.png"
+              alt="E-SBA"
+              className="w-8 h-8 object-contain"
+            />
+            <h1 className="text-xl font-bold tracking-wide">E-SBA [JHS]</h1>
+          </div>
         </div>
         <div className="flex items-center gap-4">
           <div className="text-xs text-slate-400 hidden md:block">
