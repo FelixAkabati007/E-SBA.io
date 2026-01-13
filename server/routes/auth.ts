@@ -44,7 +44,9 @@ router.post("/login", async (req, res) => {
         username: user.username,
         role: user.role,
         assignedClassId: user.assigned_class_id,
+        assignedClassName: user.class_name,
         assignedSubjectId: user.assigned_subject_id,
+        assignedSubjectName: user.subject_name,
       },
       JWT_SECRET,
       { expiresIn: "8h" }

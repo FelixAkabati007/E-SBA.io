@@ -183,6 +183,33 @@ export const apiClient = {
   }> {
     return request("/meta/talent-remarks", "GET");
   },
+  async getRankings(
+    baseClass: string,
+    academicYear: string,
+    term: string,
+    page = 1,
+    limit = 50
+  ): Promise<{
+    data: Array<{
+      student_id: string;
+      surname: string;
+      first_name: string;
+      middle_name: string;
+      class_name: string;
+      overall_score: number;
+      position: number;
+    }>;
+    total: number;
+  }> {
+    return request(
+      `/reporting/rankings?class=${encodeURIComponent(
+        baseClass
+      )}&academicYear=${encodeURIComponent(
+        academicYear
+      )}&term=${encodeURIComponent(term)}&page=${page}&limit=${limit}`,
+      "GET"
+    );
+  },
   async adminClean(confirm = "yes"): Promise<unknown> {
     return request(
       `/admin/clean-master-db?confirm=${encodeURIComponent(confirm)}`,

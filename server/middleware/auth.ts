@@ -7,7 +7,9 @@ export interface AuthRequest extends Request {
     username: string;
     role: "HEAD" | "CLASS" | "SUBJECT";
     assignedClassId?: number;
+    assignedClassName?: string;
     assignedSubjectId?: number;
+    assignedSubjectName?: string;
   };
 }
 

@@ -1,18 +1,17 @@
-
-import fs from 'fs';
-import path from 'path';
-import { pool } from './server/db';
+import fs from "fs";
+import path from "path";
+import { pool } from "./server/lib/db";
 
 async function runSeed() {
   try {
-    const sqlPath = path.join(__dirname, 'SQL', '006_seed_rbac_users.sql');
-    const sql = fs.readFileSync(sqlPath, 'utf8');
-    
-    console.log('Running seed...');
+    const sqlPath = path.join(__dirname, "SQL", "006_seed_rbac_users.sql");
+    const sql = fs.readFileSync(sqlPath, "utf8");
+
+    console.log("Running seed...");
     await pool.query(sql);
-    console.log('Seed completed successfully.');
+    console.log("Seed completed successfully.");
   } catch (err) {
-    console.error('Seed failed:', err);
+    console.error("Seed failed:", err);
   } finally {
     await pool.end();
   }

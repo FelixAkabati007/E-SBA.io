@@ -19,7 +19,7 @@ const Login: React.FC = () => {
       const data = await apiClient.request<{
         token: string;
         user: {
-          id: string;
+          id: number;
           username: string;
           fullName: string;
           role: string;
@@ -30,7 +30,7 @@ const Login: React.FC = () => {
         };
       }>("/auth/login", "POST", { username, password });
 
-      login(data.token, data.user);
+      login(data.token, data.user as any);
     } catch (err) {
       console.error("Login error:", err);
       setError((err as Error).message);

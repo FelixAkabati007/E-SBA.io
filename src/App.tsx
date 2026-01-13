@@ -31,6 +31,7 @@ import {
   Download,
   FileIcon,
   Lock,
+  Trophy,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
@@ -200,12 +201,93 @@ const DashboardTile = React.memo(
 
 export default function App() {
   const { user, logout } = useAuth();
-  const [currentView, setCurrentView] = useState("home");
-  const [activeSubject, setActiveSubject] = useState("");
-  const [selectedClass, setSelectedClass] = useState("JHS 2(A)");
-
   const [academicYear, setAcademicYear] = useState("2025/2026");
   const [term, setTerm] = useState("Term 1");
+  const [currentView, setCurrentView] = useState("home");
+
+  // Ranking Report State
+  const [rankingData, setRankingData] = useState<{
+    data: any[];
+    total: number;
+  }>({ data: [], total: 0 });
+  const [rankingPage, setRankingPage] = useState(1);
+  const [rankingLoading, setRankingLoading] = useState(false);
+  const [rankingClassFilter, setRankingClassFilter] = useState("JHS 1");
+  const [isImporting, setIsImporting] = useState(false);
+
+  const fetchRankings = async () => {
+    setRankingLoading(true);
+    try {
+      const res = await apiClient.getRankings(
+        rankingClassFilter,
+        academicYear,
+        term,
+        rankingPage,
+        50
+      );
+      setRankingData(res);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setRankingLoading(false);
+    }
+  };
+
+  const downloadRankingReport = async () => {
+    try {
+      const allData = await apiClient.getRankings(
+        rankingClassFilter,
+        academicYear,
+        term,
+        1,
+        1000 // Fetch all for report
+      );
+
+      const doc = new jsPDF();
+
+      // Header
+      doc.setFontSize(18);
+      doc.text("Student Ranking Report", 14, 20);
+
+      doc.setFontSize(11);
+      doc.setTextColor(100);
+      doc.text(`Class Level: ${rankingClassFilter}`, 14, 30);
+      doc.text(`Academic Year: ${academicYear} - ${term}`, 14, 36);
+      doc.text(
+        `Date: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
+        14,
+        42
+      );
+
+      // Table
+      (doc as any).autoTable({
+        startY: 50,
+        head: [["Rank", "Student Name", "Class", "Overall Score"]],
+        body: allData.data.map((s) => [
+          s.position,
+          `${s.surname}, ${s.first_name} ${s.middle_name}`,
+          s.class_name,
+          s.overall_score.toFixed(2),
+        ]),
+        theme: "grid",
+        headStyles: { fillColor: [30, 41, 59] }, // slate-800
+        styles: { fontSize: 10 },
+      });
+
+      doc.save(`Ranking_Report_${rankingClassFilter.replace(/ /g, "_")}.pdf`);
+    } catch (e) {
+      console.error("Download failed:", e);
+      alert("Failed to generate PDF report.");
+    }
+  };
+
+  useEffect(() => {
+    if (currentView === "ranking") {
+      fetchRankings();
+    }
+  }, [currentView, rankingClassFilter, academicYear, term, rankingPage]);
+  const [activeSubject, setActiveSubject] = useState("");
+  const [selectedClass, setSelectedClass] = useState("JHS 2(A)");
 
   const [schoolConfig, setSchoolConfig] = useState<SchoolConfig>({
     name: "Accra Excellence JHS",
@@ -358,7 +440,6 @@ export default function App() {
   }, [activeSubject, selectedClass, academicYear, term]);
 
   // removed legacy subscribeAssessments
-  const [isImporting, setIsImporting] = useState(false);
   type ImportedRow = Record<string, unknown>;
   const [importedPreview, setImportedPreview] = useState<ImportedRow[]>([]);
 
@@ -1013,52 +1094,68 @@ export default function App() {
 
   const processImport = async () => {
     if (importedPreview.length === 0) return;
-    const { newStudents, addedCount, skippedCount } = buildImportedStudents(
-      importedPreview,
-      students,
-      selectedClass,
-      academicYear
-    );
-    if (newStudents.length > 0) {
-      try {
-        await apiClient.request("/students/batch", "POST", {
-          students: newStudents,
-        });
-        setStudents((prev) => [...prev, ...newStudents]);
-        setImportLogs((prev) => [
-          ...prev,
-          {
-            status: "success",
-            message: `Import Successful! Added ${addedCount} students.`,
-          },
-        ]);
-        if (skippedCount > 0) {
+    setIsImporting(true);
+    try {
+      const { newStudents, addedCount, skippedCount } = buildImportedStudents(
+        importedPreview,
+        students,
+        selectedClass,
+        academicYear
+      );
+      if (newStudents.length > 0) {
+        try {
+          await apiClient.request("/students/batch", "POST", {
+            students: newStudents,
+          });
+          setStudents((prev) => [...prev, ...newStudents]);
           setImportLogs((prev) => [
             ...prev,
             {
-              status: "warning",
-              message: `Skipped ${skippedCount} duplicates or incomplete records.`,
+              status: "success",
+              message: `Import Successful! Added ${addedCount} students.`,
             },
           ]);
+          if (skippedCount > 0) {
+            setImportLogs((prev) => [
+              ...prev,
+              {
+                status: "warning",
+                message: `Skipped ${skippedCount} duplicates or incomplete records.`,
+              },
+            ]);
+          }
+          setImportedPreview([]);
+        } catch (e) {
+          setImportLogs((prev) => [
+            ...prev,
+            {
+              status: "error",
+              message: "unsucessful",
+            },
+          ]);
+          console.error("Import failed:", e);
         }
-        setImportedPreview([]);
-      } catch (e) {
+      } else {
         setImportLogs((prev) => [
           ...prev,
           {
-            status: "error",
-            message: `Import failed: ${(e as Error).message}`,
+            status: "warning",
+            message:
+              "No valid students found to import. Check required columns.",
           },
         ]);
       }
-    } else {
+    } catch (e) {
       setImportLogs((prev) => [
         ...prev,
         {
-          status: "warning",
-          message: "No valid students found to import. Check required columns.",
+          status: "error",
+          message: "unsucessful",
         },
       ]);
+      console.error("Import processing error:", e);
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -2011,6 +2108,170 @@ export default function App() {
     );
   };
 
+  const renderRankingReport = () => (
+    <div className="space-y-6 animate-in fade-in duration-500">
+      <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setCurrentView("home")}
+              className="p-2 hover:bg-slate-100 rounded-full transition-colors"
+              title="Back to Dashboard"
+            >
+              <ArrowLeft size={24} className="text-slate-600" />
+            </button>
+            <div>
+              <h2 className="text-2xl font-bold text-slate-800">
+                Student Ranking Report
+              </h2>
+              <p className="text-slate-500 text-sm">
+                Comprehensive performance analysis across streams
+              </p>
+            </div>
+          </div>
+
+          <div className="flex gap-4">
+            <select
+              value={rankingClassFilter}
+              onChange={(e) => {
+                setRankingClassFilter(e.target.value);
+                setRankingPage(1);
+              }}
+              className="p-2 border border-slate-300 rounded-md bg-slate-50"
+            >
+              <option value="JHS 1">JHS 1 (All Streams)</option>
+              <option value="JHS 2">JHS 2 (All Streams)</option>
+              <option value="JHS 3">JHS 3 (All Streams)</option>
+            </select>
+            <button
+              onClick={downloadRankingReport}
+              className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors"
+            >
+              <Download size={18} /> Download PDF
+            </button>
+            <button
+              onClick={() => window.print()}
+              className="flex items-center gap-2 bg-slate-800 text-white px-4 py-2 rounded-lg hover:bg-slate-900 transition-colors"
+            >
+              <Printer size={18} /> Print Report
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="p-3 text-left font-semibold text-slate-700">
+                  Rank
+                </th>
+                <th className="p-3 text-left font-semibold text-slate-700">
+                  Student Name
+                </th>
+                <th className="p-3 text-left font-semibold text-slate-700">
+                  Class
+                </th>
+                <th className="p-3 text-right font-semibold text-slate-700">
+                  Overall Score
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rankingLoading ? (
+                <tr>
+                  <td colSpan={4} className="p-8 text-center text-slate-500">
+                    Loading rankings...
+                  </td>
+                </tr>
+              ) : rankingData.data.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="p-8 text-center text-slate-500">
+                    No data found for this selection.
+                  </td>
+                </tr>
+              ) : (
+                rankingData.data.map((student) => (
+                  <tr
+                    key={student.student_id}
+                    className="border-b border-slate-100 hover:bg-slate-50"
+                  >
+                    <td className="p-3">
+                      <div
+                        className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
+                          student.position === 1
+                            ? "bg-yellow-100 text-yellow-700"
+                            : student.position === 2
+                            ? "bg-slate-200 text-slate-700"
+                            : student.position === 3
+                            ? "bg-orange-100 text-orange-700"
+                            : "bg-slate-50 text-slate-600"
+                        }`}
+                      >
+                        {student.position}
+                      </div>
+                    </td>
+                    <td className="p-3 font-medium text-slate-800">
+                      {student.surname}, {student.first_name}{" "}
+                      {student.middle_name}
+                    </td>
+                    <td className="p-3 text-slate-600">{student.class_name}</td>
+                    <td className="p-3 text-right font-mono font-medium text-slate-700">
+                      {student.overall_score.toFixed(2)}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="flex justify-between items-center mt-4">
+          <span className="text-sm text-slate-500">
+            Showing {(rankingPage - 1) * 50 + 1} to{" "}
+            {Math.min(rankingPage * 50, rankingData.total)} of{" "}
+            {rankingData.total} students
+          </span>
+          <div className="flex gap-2">
+            <button
+              disabled={rankingPage === 1}
+              onClick={() => setRankingPage((p) => p - 1)}
+              className="px-3 py-1 border border-slate-300 rounded disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <button
+              disabled={rankingPage * 50 >= rankingData.total}
+              onClick={() => setRankingPage((p) => p + 1)}
+              className="px-3 py-1 border border-slate-300 rounded disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      </div>
+      <style>{`
+         @media print {
+           body * {
+             visibility: hidden;
+           }
+           .animate-in {
+             visibility: visible;
+             position: absolute;
+             left: 0;
+             top: 0;
+             width: 100%;
+           }
+           button {
+             display: none !important;
+           }
+           .shadow-sm, .shadow-md, .shadow-xl {
+             box-shadow: none !important;
+           }
+         }
+       `}</style>
+    </div>
+  );
+
   const renderHome = () => (
     <div className="space-y-6 animate-in fade-in duration-500">
       <ProgressStats />
@@ -2094,16 +2355,27 @@ export default function App() {
 
         {/* Progress Bar for Headmaster */}
         {user?.role === "HEAD" && (
-          <div className="mt-6">
-            <h3 className="text-lg font-semibold text-slate-700 mb-2">
-              Overall Progress
-            </h3>
-            <ProgressBar
-              scope="class"
-              className={selectedClass}
-              academicYear={academicYear}
-              term={term}
-            />
+          <div className="mt-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div className="flex-1 w-full">
+              <h3 className="text-lg font-semibold text-slate-700 mb-2">
+                Overall Progress
+              </h3>
+              <ProgressBar
+                scope="class"
+                className={selectedClass}
+                academicYear={academicYear}
+                term={term}
+              />
+            </div>
+            <div>
+              <button
+                onClick={() => setCurrentView("ranking")}
+                className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm whitespace-nowrap"
+              >
+                <Trophy size={18} />
+                View Rankings
+              </button>
+            </div>
           </div>
         )}
 
@@ -4799,9 +5071,21 @@ export default function App() {
               {importedPreview.length > 0 && (
                 <button
                   onClick={processImport}
-                  className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium shadow-sm flex items-center gap-2 transition-all hover:shadow-md"
+                  disabled={isImporting}
+                  className={`px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium shadow-sm flex items-center gap-2 transition-all hover:shadow-md ${
+                    isImporting ? "opacity-70 cursor-not-allowed" : ""
+                  }`}
                 >
-                  <Download size={18} /> Confirm Import
+                  {isImporting ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" />
+                      Uploading...
+                    </>
+                  ) : (
+                    <>
+                      <Download size={18} /> Confirm Import
+                    </>
+                  )}
                 </button>
               )}
             </div>

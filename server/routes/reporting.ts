@@ -4,6 +4,7 @@ import {
   getTalent,
   saveAttendance,
   getAttendance,
+  getRankings,
 } from "../services/reporting";
 import { getStudentClass } from "../services/students";
 import { authenticateToken, AuthRequest } from "../middleware/auth";
@@ -115,6 +116,35 @@ router.get("/attendance", async (req: any, res) => {
       String(term)
     );
     res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+router.get("/rankings", async (req: any, res) => {
+  try {
+    const { class: baseClass, academicYear, term, page, limit } = req.query;
+
+    if (!baseClass || !academicYear || !term) {
+      return res.status(400).json({ error: "Missing required parameters" });
+    }
+
+    // Role check: Only HEAD should access full rankings
+    const user = req.user!;
+    if (user.role !== "HEAD") {
+      return res
+        .status(403)
+        .json({ error: "Access denied. Head Teacher only." });
+    }
+
+    const result = await getRankings(
+      String(baseClass),
+      String(academicYear),
+      String(term),
+      Number(page) || 1,
+      Number(limit) || 50
+    );
+    res.json(result);
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
