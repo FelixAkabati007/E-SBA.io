@@ -129,6 +129,7 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({
         <div className="flex items-center gap-4">
           <input
             type="date"
+            aria-label="Date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
             className="border rounded px-3 py-2 text-sm"
@@ -198,6 +199,7 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({
                   <td className="px-4 py-3 text-center">
                     <input
                       type="time"
+                      aria-label="Arrival Time"
                       value={student.arrival_time?.slice(0, 5) || ""}
                       onChange={(e) =>
                         handleTimeChange(student.student_id, e.target.value)

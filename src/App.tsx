@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useRef, useState } from "react";
+import React, { useMemo, useEffect, useRef, useState, Suspense } from "react";
 import { useAuth } from "./context/AuthContext";
 import {
   Calculator,
@@ -25,8 +25,6 @@ import {
   Settings,
   Upload,
   Image as ImageIcon,
-  RotateCw,
-  Eye,
   FileSpreadsheet,
   Download,
   FileIcon,
@@ -34,11 +32,19 @@ import {
   Trophy,
 } from "lucide-react";
 import { AttendanceRegister } from "./components/AttendanceRegister";
-import * as XLSX from "xlsx";
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
+import { RankingReport } from "./components/RankingReport";
+
+const SystemSetup = React.lazy(() =>
+  import("./components/SystemSetup").then((module) => ({
+    default: module.SystemSetup,
+  }))
+);
+const ReportCards = React.lazy(() => import("./components/ReportCards"));
+
 import { logger } from "./lib/logger";
 import { apiClient } from "./lib/apiClient";
+import { calculateGrade, getOrdinal, GRADING_SYSTEM } from "./lib/grading";
+import { AssessmentMarkRow, RankingData, RankingRow } from "./lib/apiTypes";
 import { SyncClient } from "./lib/syncClient";
 import { offlineDb, type OfflineStudent } from "./lib/offlineDb";
 import {
@@ -249,19 +255,6 @@ export default function App() {
   }, []);
 
   // Ranking Report State
-  interface RankingRow {
-    student_id: string;
-    position: number;
-    surname: string;
-    first_name: string;
-    middle_name: string;
-    class_name: string;
-    overall_score: number;
-  }
-  interface RankingData {
-    data: RankingRow[];
-    total: number;
-  }
   const [rankingData, setRankingData] = useState<RankingData | RankingRow[]>({
     data: [],
     total: 0,
@@ -302,6 +295,8 @@ export default function App() {
         1000 // Fetch all for report
       );
 
+      const { jsPDF } = await import("jspdf");
+      const { default: autoTable } = await import("jspdf-autotable");
       const doc = new jsPDF();
 
       // Header
@@ -352,6 +347,16 @@ export default function App() {
   const [activeSubject, setActiveSubject] = useState("");
   const [selectedClass, setSelectedClass] = useState("JHS 2(A)");
 
+  // Sync Global Class Selector to Ranking Class Filter
+  useEffect(() => {
+    if (selectedClass) {
+      const level = selectedClass.split("(")[0].trim();
+      if (["JHS 1", "JHS 2", "JHS 3"].includes(level)) {
+        setRankingClassFilter(level);
+      }
+    }
+  }, [selectedClass]);
+
   const [schoolConfig, setSchoolConfig] = useState<SchoolConfig>({
     name: "Accra Excellence JHS",
     motto: "Discipline and Hard Work",
@@ -384,8 +389,6 @@ export default function App() {
     { min: 35, max: 39, grade: 8, remark: "Lowest", desc: "Fail" },
     { min: 0, max: 34, grade: 9, remark: "Fail", desc: "Fail" },
   ]);
-
-  const [reportId, setReportId] = useState("");
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const addStudentFirstFieldRef = useRef<HTMLInputElement>(null);
@@ -481,18 +484,15 @@ export default function App() {
                   exam: number;
                 }
               >);
+            const row = r as unknown as AssessmentMarkRow;
             next[sid][subject] = {
-              cat1: Number((r as any).cat1 ?? (r as any).cat1_score ?? 0),
-              cat2: Number((r as any).cat2 ?? (r as any).cat2_score ?? 0),
-              cat3: Number((r as any).cat3 ?? (r as any).cat3_score ?? 0),
-              cat4: Number((r as any).cat4 ?? (r as any).cat4_score ?? 0),
-              group: Number(
-                (r as any).group ?? (r as any).group_work_score ?? 0
-              ),
-              project: Number(
-                (r as any).project ?? (r as any).project_work_score ?? 0
-              ),
-              exam: Number((r as any).exam ?? (r as any).exam_score ?? 0),
+              cat1: Number(row.cat1 ?? row.cat1_score ?? 0),
+              cat2: Number(row.cat2 ?? row.cat2_score ?? 0),
+              cat3: Number(row.cat3 ?? row.cat3_score ?? 0),
+              cat4: Number(row.cat4 ?? row.cat4_score ?? 0),
+              group: Number(row.group ?? row.group_work_score ?? 0),
+              project: Number(row.project ?? row.project_work_score ?? 0),
+              exam: Number(row.exam ?? row.exam_score ?? 0),
             };
           }
           return next;
@@ -576,7 +576,7 @@ export default function App() {
           const next: Marks = { ...prev };
 
           Object.entries(allMarks).forEach(([subject, rows]) => {
-            rows.forEach((r: any) => {
+            rows.forEach((r: AssessmentMarkRow) => {
               const sid = String(r.student_id);
               if (!next[sid]) {
                 next[sid] = {};
@@ -604,19 +604,7 @@ export default function App() {
   type ImportedRow = Record<string, unknown>;
   const [importedPreview, setImportedPreview] = useState<ImportedRow[]>([]);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const importFileInputRef = useRef<HTMLInputElement>(null);
-  const [logoError, setLogoError] = useState<string | null>(null);
-  const [isProcessingLogo, setIsProcessingLogo] = useState(false);
-  const [logoFile, setLogoFile] = useState<File | null>(null);
-  const [isLogoUploading, setIsLogoUploading] = useState(false);
-  const [logoFeedback, setLogoFeedback] = useState<string | null>(null);
-  const [attendancePresent, setAttendancePresent] = useState("");
-  const [attendanceTotal, setAttendanceTotal] = useState("");
-  const [talentRemark, setTalentRemark] = useState("");
-  const [talentRemarkOther, setTalentRemarkOther] = useState("");
-  const [teacherRemark, setTeacherRemark] = useState("");
-  const [teacherRemarkOther, setTeacherRemarkOther] = useState("");
 
   const [deleteConfirmation, setDeleteConfirmation] = useState({
     isOpen: false,
@@ -628,9 +616,6 @@ export default function App() {
 
   const [isGeneratingDoc, setIsGeneratingDoc] = useState(false);
   const [docStatus, setDocStatus] = useState("");
-  const [headSignatureDataUrl, setHeadSignatureDataUrl] = useState<
-    string | null
-  >(null);
 
   const [formData, setFormData] = useState({
     id: "",
@@ -646,6 +631,10 @@ export default function App() {
   const [formErrors, setFormErrors] = useState<{ [key: string]: string }>({});
 
   const [students, setStudents] = useState<Student[]>([]);
+  const existingStudentIds = useMemo(
+    () => new Set(students.map((s) => s.id)),
+    [students]
+  );
   const filteredStudents = useMemo(
     () =>
       students.filter(
@@ -657,6 +646,79 @@ export default function App() {
   );
 
   const [marks, setMarks] = useState<Marks>({});
+
+  const classStats = useMemo(() => {
+    if (!activeSubject) return null;
+
+    const stats = {
+      cat1: [] as number[],
+      cat2: [] as number[],
+      group: [] as number[],
+      project: [] as number[],
+      rawSBA: [] as number[],
+      scaledSBA: [] as number[],
+      exam: [] as number[],
+      scaledExam: [] as number[],
+      final: [] as number[],
+      attendance: [] as number[],
+    };
+
+    filteredStudents.forEach((s) => {
+      const m = marks[s.id]?.[activeSubject];
+      const att = attendanceMap[s.id];
+      if (att && att.total > 0) {
+        stats.attendance.push((att.present / att.total) * 100);
+      }
+
+      if (m) {
+        if (m.cat1 !== undefined) stats.cat1.push(m.cat1);
+        if (m.cat2 !== undefined) stats.cat2.push(m.cat2);
+        if (m.group !== undefined) stats.group.push(m.group);
+        if (m.project !== undefined) stats.project.push(m.project);
+
+        const rawSBA =
+          (m.cat1 || 0) +
+          (m.cat2 || 0) +
+          (m.cat3 || 0) +
+          (m.cat4 || 0) +
+          (m.group || 0) +
+          (m.project || 0);
+        stats.rawSBA.push(rawSBA);
+
+        const scaledSBA = (rawSBA / 80) * schoolConfig.catWeight;
+        stats.scaledSBA.push(scaledSBA);
+
+        if (m.exam !== undefined) stats.exam.push(m.exam);
+        const scaledExam = ((m.exam || 0) / 100) * schoolConfig.examWeight;
+        stats.scaledExam.push(scaledExam);
+
+        stats.final.push(Math.round(scaledSBA + scaledExam));
+      }
+    });
+
+    const calc = (arr: number[]) => ({
+      avg:
+        arr.length > 0
+          ? (arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1)
+          : "-",
+      max: arr.length > 0 ? Math.max(...arr).toFixed(1) : "-",
+      min: arr.length > 0 ? Math.min(...arr).toFixed(1) : "-",
+      cnt: arr.length,
+    });
+
+    return {
+      cat1: calc(stats.cat1),
+      cat2: calc(stats.cat2),
+      group: calc(stats.group),
+      project: calc(stats.project),
+      rawSBA: calc(stats.rawSBA),
+      scaledSBA: calc(stats.scaledSBA),
+      exam: calc(stats.exam),
+      scaledExam: calc(stats.scaledExam),
+      final: calc(stats.final),
+      attendance: calc(stats.attendance),
+    };
+  }, [filteredStudents, marks, activeSubject, schoolConfig, attendanceMap]);
 
   // Load students from SQL API (replaces LS)
   useEffect(() => {
@@ -772,164 +834,6 @@ export default function App() {
   // Duplicate auto-save logic removed.
   // Use manual save for Talent (handleSaveTalent) and filtered auto-save for Attendance (below).
 
-  const [reportDataLoaded, setReportDataLoaded] = useState(false);
-  useEffect(() => {
-    if (currentView !== "report") return;
-    const sid = reportId || filteredStudents[0]?.id;
-    if (!sid) return;
-
-    const fetchData = async () => {
-      setReportDataLoaded(false);
-      setTalentRemark("");
-      setTeacherRemark("");
-      setAttendancePresent("");
-      setAttendanceTotal("");
-
-      try {
-        const tRes = await fetch(
-          `/api/reporting/talent?studentId=${sid}&academicYear=${academicYear}&term=${term}`,
-          {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem("token")}`,
-            },
-          }
-        );
-        if (tRes.ok) {
-          const tData = await tRes.json();
-          setTalentRemark(tData.talent_remark || "");
-          setTeacherRemark(tData.class_teacher_remark || "");
-        }
-
-        const aRes = await fetch(
-          `/api/reporting/attendance?studentId=${sid}&academicYear=${academicYear}&term=${term}`,
-          {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem("token")}`,
-            },
-          }
-        );
-        if (aRes.ok) {
-          const aData = await aRes.json();
-          setAttendancePresent(String(aData.days_present || ""));
-          setAttendanceTotal(String(aData.days_total || ""));
-        }
-      } catch (e) {
-        console.error("Failed to load report data", e);
-      } finally {
-        setReportDataLoaded(true);
-      }
-    };
-    fetchData();
-  }, [reportId, selectedClass, academicYear, term, currentView]);
-
-  // Track original values for Cancel functionality
-  const [originalTalent, setOriginalTalent] = useState({
-    talent: "",
-    teacher: "",
-  });
-  const [isTalentSaving, setIsTalentSaving] = useState(false);
-
-  // Update original values when data loads
-  useEffect(() => {
-    if (reportDataLoaded) {
-      setOriginalTalent({
-        talent: talentRemark,
-        teacher: teacherRemark,
-      });
-    }
-  }, [reportDataLoaded]);
-
-  const hasTalentChanges = useMemo(() => {
-    return (
-      talentRemark !== originalTalent.talent ||
-      teacherRemark !== originalTalent.teacher ||
-      (talentRemark === "Other" && talentRemarkOther !== "") ||
-      (teacherRemark === "Other" && teacherRemarkOther !== "")
-    );
-  }, [
-    talentRemark,
-    talentRemarkOther,
-    teacherRemark,
-    teacherRemarkOther,
-    originalTalent,
-  ]);
-
-  const handleSaveTalent = async () => {
-    const sid = reportId || filteredStudents[0]?.id;
-    if (!sid) return;
-
-    setIsTalentSaving(true);
-    try {
-      await apiClient.request("/reporting/talent", "POST", {
-        studentId: sid,
-        academicYear,
-        term,
-        talent: talentRemark === "Other" ? talentRemarkOther : talentRemark,
-        teacher: teacherRemark === "Other" ? teacherRemarkOther : teacherRemark,
-        head: "",
-      });
-
-      setOriginalTalent({
-        talent: talentRemark,
-        teacher: teacherRemark,
-      });
-      // Optional: Show success indicator
-      const btn = document.getElementById("save-talent-btn");
-      if (btn) {
-        const originalText = btn.innerText;
-        btn.innerText = "Saved!";
-        setTimeout(() => (btn.innerText = originalText), 2000);
-      }
-    } catch (e) {
-      logger.error("save_talent_failed", e);
-      alert("Failed to save changes. Please try again.");
-    } finally {
-      setIsTalentSaving(false);
-    }
-  };
-
-  const handleCancelTalent = () => {
-    setTalentRemark(originalTalent.talent);
-    setTeacherRemark(originalTalent.teacher);
-    // Reset "Other" fields if applicable
-    setTalentRemarkOther("");
-    setTeacherRemarkOther("");
-  };
-
-  // Auto-save Attendance (Only for HEAD/Admin, disabled for CLASS)
-  useEffect(() => {
-    const sid = reportId || filteredStudents[0]?.id;
-    if (!sid || currentView !== "report" || !reportDataLoaded) return;
-
-    // Class Teachers cannot edit Attendance, so no auto-save needed for them
-    if (user?.role === "CLASS") return;
-
-    const timer = setTimeout(async () => {
-      try {
-        await apiClient.request("/reporting/attendance", "POST", {
-          studentId: sid,
-          academicYear,
-          term,
-          present: attendancePresent,
-          total: attendanceTotal,
-        });
-      } catch (e) {
-        console.error("Auto-save attendance failed", e);
-      }
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [
-    attendancePresent,
-    attendanceTotal,
-    reportId,
-    filteredStudents,
-    currentView,
-    academicYear,
-    term,
-    reportDataLoaded,
-    user,
-  ]);
-
   // Save System Config
   useEffect(() => {
     if (!user || user.role !== "HEAD") return;
@@ -946,10 +850,6 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [schoolConfig, academicYear, term, user]);
 
-  useEffect(() => {
-    setReportId("");
-  }, [selectedClass]);
-
   const academicYearOptions = useMemo(() => {
     const years: string[] = [];
     for (let year = 2025; year <= 2090; year++) {
@@ -957,19 +857,6 @@ export default function App() {
     }
     return years;
   }, []);
-
-  const calculateGrade = (score: number) => {
-    const found = gradingSystem.find((s) => score >= s.min && score <= s.max);
-    return found
-      ? { grade: found.grade, remark: found.remark, desc: found.desc }
-      : { grade: 9, remark: "Fail", desc: "Fail" };
-  };
-
-  const getOrdinal = (n: number) => {
-    const s = ["th", "st", "nd", "rd"] as const;
-    const v = n % 100;
-    return n + (s[(v - 20) % 10] || s[v] || s[0]);
-  };
 
   const clamp = (f: string, n: number) => {
     const v = Number.isFinite(n) ? n : 0;
@@ -1046,6 +933,7 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = async (evt) => {
       try {
+        const XLSX = await import("xlsx");
         const data = evt.target?.result as ArrayBuffer;
         const workbook = XLSX.read(data, {
           type: "array",
@@ -1227,6 +1115,7 @@ export default function App() {
       await new Promise((r) => setTimeout(r, 0));
       const macroMode = /\.xlsm$/i.test(v.meta.name || "");
       const t0 = performance.now();
+      const XLSX = await import("xlsx");
       const wb = XLSX.read(v.data as ArrayBuffer, {
         type: "array",
         cellDates: true,
@@ -1282,18 +1171,27 @@ export default function App() {
   const processImport = async () => {
     if (importedPreview.length === 0) return;
     setIsImporting(true);
+    // Yield to allow UI update
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
     try {
       const { newStudents, addedCount, skippedCount } = buildImportedStudents(
         importedPreview,
-        students,
+        existingStudentIds,
         selectedClass,
         academicYear
       );
       if (newStudents.length > 0) {
         try {
-          await apiClient.request("/students/batch", "POST", {
-            students: newStudents,
-          });
+          // Chunked upload for performance
+          const CHUNK_SIZE = 50;
+          for (let i = 0; i < newStudents.length; i += CHUNK_SIZE) {
+            const chunk = newStudents.slice(i, i + CHUNK_SIZE);
+            await apiClient.request("/students/batch", "POST", {
+              students: chunk,
+            });
+          }
+
           setStudents((prev) => [...prev, ...newStudents]);
           setImportLogs((prev) => [
             ...prev,
@@ -1349,8 +1247,9 @@ export default function App() {
   const exportDBToExcel = () => {
     setIsGeneratingDoc(true);
     setDocStatus("Preparing Excel file...");
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
+        const XLSX = await import("xlsx");
         const ws = XLSX.utils.json_to_sheet(
           students.map((s) => ({
             ID: s.id,
@@ -1439,556 +1338,6 @@ export default function App() {
   };
 
   // Subject PDF export removed in favor of structured template downloads
-
-  const generateReportCardPDF = (studentId: string | null = null) => {
-    setIsGeneratingDoc(true);
-    const targetStudents = studentId
-      ? students.filter((s) => s.id === studentId)
-      : filteredStudents;
-    const modeText = studentId
-      ? "Report Card"
-      : `Batch (${targetStudents.length})`;
-    setDocStatus(`Generating ${modeText}...`);
-    setTimeout(() => {
-      try {
-        const doc = new jsPDF();
-        targetStudents.forEach((student, index) => {
-          if (index > 0) doc.addPage();
-          if (schoolConfig.logoUrl) {
-            doc.addImage(schoolConfig.logoUrl, "PNG", 15, 10, 25, 25);
-          } else {
-            doc.setDrawColor(200);
-            doc.rect(15, 10, 25, 25);
-            doc.setFontSize(8);
-            doc.text("Logo", 22, 25);
-          }
-          let currentY = 20;
-          const centerX = 105;
-          const maxWidth = 180;
-
-          // School Name
-          doc.setFontSize(20);
-          doc.setFont("helvetica", "bold");
-          const nameLines = doc.splitTextToSize(
-            schoolConfig.name.toUpperCase(),
-            160
-          );
-          doc.text(nameLines, centerX, currentY, {
-            align: "center",
-            charSpace: 1,
-          });
-          currentY += nameLines.length * 8; // ~8mm per line for 20pt
-
-          // Address
-          doc.setFontSize(10);
-          doc.setFont("helvetica", "normal");
-          const addressLines = doc.splitTextToSize(
-            schoolConfig.address,
-            maxWidth
-          );
-          doc.text(addressLines, centerX, currentY, { align: "center" });
-          currentY += addressLines.length * 5 + 2;
-
-          // Motto
-          doc.setFontSize(10);
-          doc.setFont("helvetica", "italic");
-          const mottoText = `"${schoolConfig.motto.trim().toUpperCase()}"`;
-          const mottoLines = doc.splitTextToSize(mottoText, 160);
-          doc.text(mottoLines, centerX, currentY, {
-            align: "center",
-          });
-          currentY += mottoLines.length * 5 + 4;
-
-          // Decorative Divider
-          doc.setDrawColor(0);
-          doc.setLineWidth(0.5);
-          doc.line(15, currentY, 195, currentY);
-          currentY += 10;
-
-          // Report Title
-          doc.setFontSize(18);
-          doc.setFont("helvetica", "bold");
-          doc.text("TERMINAL REPORT", centerX, currentY, { align: "center" });
-          currentY += 4;
-
-          // Bottom Divider
-          doc.setLineWidth(0.5);
-          doc.line(15, currentY, 195, currentY);
-
-          // Update startY for content
-          doc.setFontSize(10);
-          doc.setFont("helvetica", "normal");
-          const startY = currentY + 10;
-          const leftX = 15;
-          const rightX = 110;
-          const lineHeight = 7;
-          const drawField = (
-            label: string,
-            value: string,
-            x: number,
-            y: number,
-            maxWidth?: number
-          ) => {
-            doc.setFont("helvetica", "bold");
-            doc.text(label, x, y);
-            const labelWidth = doc.getTextWidth(label);
-            doc.setFont("helvetica", "normal");
-            const val = value || "";
-            if (maxWidth) {
-              const availableWidth = maxWidth - labelWidth - 2;
-              const lines = doc.splitTextToSize(val, availableWidth);
-              doc.text(lines, x + labelWidth + 2, y);
-            } else {
-              doc.text(val, x + labelWidth + 2, y);
-            }
-          };
-
-          drawField(
-            "Name:",
-            `${student.surname}, ${student.firstName} ${student.middleName}`,
-            leftX,
-            startY
-          );
-          drawField("ID:", student.id, rightX, startY);
-          drawField("Class:", student.class, leftX, startY + lineHeight);
-          drawField(
-            "Term:",
-            `${term}, ${academicYear}`,
-            rightX,
-            startY + lineHeight
-          );
-          drawField("DOB:", student.dob, leftX, startY + lineHeight * 2);
-          drawField(
-            "Contact:",
-            student.guardianContact,
-            rightX,
-            startY + lineHeight * 2,
-            85
-          );
-          const subjectRanks: Record<string, string> = {};
-          SUBJECTS.forEach((subj) => {
-            const allScores = filteredStudents
-              .map((s) => {
-                const m = marks[s.id]?.[subj] || {
-                  cat1: 0,
-                  cat2: 0,
-                  cat3: 0,
-                  cat4: 0,
-                  group: 0,
-                  project: 0,
-                  exam: 0,
-                };
-                const rawSBA =
-                  m.cat1 + m.cat2 + m.cat3 + m.cat4 + m.group + m.project;
-                const total =
-                  (rawSBA / 80) * schoolConfig.catWeight +
-                  (m.exam / 100) * schoolConfig.examWeight;
-                return { id: s.id, score: total };
-              })
-              .sort((a, b) => b.score - a.score);
-            const rank = allScores.findIndex((x) => x.id === student.id);
-            subjectRanks[subj] = rank !== -1 ? getOrdinal(rank + 1) : "-";
-          });
-          const tableData = SUBJECTS.map((subj) => {
-            const m = marks[student.id]?.[subj] || {
-              cat1: 0,
-              cat2: 0,
-              cat3: 0,
-              cat4: 0,
-              group: 0,
-              project: 0,
-              exam: 0,
-            };
-            const rawSBA =
-              m.cat1 + m.cat2 + m.cat3 + m.cat4 + m.group + m.project;
-            const scaledSBA = (rawSBA / 80) * schoolConfig.catWeight;
-            const scaledExam = (m.exam / 100) * schoolConfig.examWeight;
-            const final = Math.round(scaledSBA + scaledExam);
-            const g = calculateGrade(final);
-            return [
-              subj,
-              scaledSBA.toFixed(1),
-              scaledExam.toFixed(1),
-              final,
-              g.grade,
-              subjectRanks[subj],
-              g.desc,
-            ];
-          });
-          const PAGE_MARGIN = 10;
-          (doc as jsPDF & { autoTable: (opts: unknown) => void }).autoTable({
-            head: [
-              [
-                "Subject",
-                `Class (${schoolConfig.catWeight}%)`,
-                `Exam (${schoolConfig.examWeight}%)`,
-                "Total",
-                "Grade",
-                "Pos",
-                "Remark",
-              ],
-            ],
-            body: tableData,
-            startY: startY + 25,
-            theme: "grid",
-            margin: { left: PAGE_MARGIN, right: PAGE_MARGIN },
-            headStyles: { fillColor: [41, 128, 185] },
-            styles: { fontSize: 10, valign: "middle", halign: "center" },
-            columnStyles: { 0: { halign: "left" }, 6: { halign: "left" } },
-          });
-          const y =
-            (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable
-              .finalY + 10;
-          const baseY = y;
-          const col1X = 15;
-          const col2X = 77.5;
-          const col3X = 140;
-          const colWidth = 55;
-
-          // --- Column 1: Grading System ---
-          doc.setFontSize(8);
-          doc.setFont("helvetica", "bold");
-          doc.text("GRADING SYSTEM", col1X, baseY);
-
-          const gradeRows = gradingSystem.map((band) => [
-            String(band.grade),
-            `${band.min}–${band.max}`,
-            band.desc,
-          ]);
-
-          (doc as jsPDF & { autoTable: (opts: unknown) => void }).autoTable({
-            head: [["Grade", "Range", "Remark"]],
-            body: gradeRows,
-            startY: baseY + 4,
-            theme: "grid",
-            margin: { left: col1X },
-            tableWidth: colWidth,
-            headStyles: {
-              fontSize: 6,
-              fillColor: [230, 230, 230],
-              textColor: 60,
-              halign: "left",
-            },
-            styles: {
-              fontSize: 6,
-              valign: "middle",
-              halign: "left",
-              cellPadding: 1,
-              lineWidth: 0.1,
-            },
-            columnStyles: {
-              0: { cellWidth: 10 },
-              1: { cellWidth: 20 },
-              2: { cellWidth: "auto" },
-            },
-          });
-
-          const col1End = (doc as jsPDF & { lastAutoTable: { finalY: number } })
-            .lastAutoTable.finalY;
-
-          // --- Column 2: Student Report ---
-          let y2 = baseY;
-          doc.setFontSize(8);
-          doc.setFont("helvetica", "bold");
-          doc.text("STUDENT REPORT", col2X, y2);
-          y2 += 8;
-
-          // Attendance
-          doc.setFontSize(7);
-          doc.setFont("helvetica", "bold");
-          doc.text("ATTENDANCE", col2X, y2);
-          y2 += 4;
-
-          const outOfText = " out of ";
-          doc.setFont("helvetica", "normal");
-          const outOfWidth = doc.getTextWidth(outOfText);
-          const lineLength = (colWidth - outOfWidth - 2) / 2;
-
-          doc.setLineWidth(0.1);
-          (
-            doc as jsPDF & {
-              setLineDash: (dash: number[], offset: number) => void;
-            }
-          ).setLineDash([], 0);
-
-          // Field 1
-          doc.line(col2X, y2, col2X + lineLength, y2);
-          if (attendancePresent) {
-            doc.text(attendancePresent, col2X + lineLength / 2, y2 - 1, {
-              align: "center",
-            });
-          }
-
-          // Separator
-          doc.text(outOfText, col2X + lineLength + 1, y2);
-
-          // Field 2
-          const startX2 = col2X + lineLength + 1 + outOfWidth + 1;
-          doc.line(startX2, y2, startX2 + lineLength, y2);
-          if (attendanceTotal) {
-            doc.text(attendanceTotal, startX2 + lineLength / 2, y2 - 1, {
-              align: "center",
-            });
-          }
-
-          y2 += 8;
-
-          // Talent
-          doc.setFont("helvetica", "bold");
-          doc.text("TALENT & INTEREST", col2X, y2);
-          y2 += 4;
-          doc.setFont("helvetica", "normal");
-          const talentText =
-            talentRemark === "Other" && talentRemarkOther
-              ? talentRemarkOther
-              : talentRemark || "";
-
-          if (talentText) {
-            const splitTalent = doc.splitTextToSize(talentText, colWidth);
-            doc.text(splitTalent, col2X, y2);
-            // Add underline for the text
-            doc.line(col2X, y2 + 1, col2X + colWidth, y2 + 1);
-            y2 += Math.max(splitTalent.length * 5, 8);
-            // Add an extra line for visual balance
-            doc.line(col2X, y2, col2X + colWidth, y2);
-            y2 += 5;
-          } else {
-            // 3 solid lines for manual entry
-            for (let i = 0; i < 3; i++) {
-              doc.line(col2X, y2 + i * 6, col2X + colWidth, y2 + i * 6);
-            }
-            y2 += 18;
-          }
-          y2 += 4;
-
-          // Class Teacher Remark
-          doc.setFont("helvetica", "bold");
-          doc.text("CLASS TEACHER'S REMARK", col2X, y2);
-          y2 += 4;
-          doc.setFont("helvetica", "normal");
-          const teacherText =
-            teacherRemark === "Other" && teacherRemarkOther
-              ? teacherRemarkOther
-              : teacherRemark || "";
-
-          if (teacherText) {
-            const splitTeacher = doc.splitTextToSize(teacherText, colWidth);
-            doc.text(splitTeacher, col2X, y2);
-            // Add underline for the text
-            doc.line(col2X, y2 + 1, col2X + colWidth, y2 + 1);
-            y2 += Math.max(splitTeacher.length * 5, 8);
-            // Add extra lines for visual balance
-            doc.line(col2X, y2, col2X + colWidth, y2);
-            y2 += 5;
-            doc.line(col2X, y2, col2X + colWidth, y2);
-            y2 += 5;
-          } else {
-            // 4 solid lines for manual entry
-            for (let i = 0; i < 4; i++) {
-              doc.line(col2X, y2 + i * 6, col2X + colWidth, y2 + i * 6);
-            }
-            y2 += 24;
-          }
-
-          // --- Column 3: Head Teacher ---
-          let y3 = baseY;
-          doc.setFont("helvetica", "bold");
-          doc.text("HEAD TEACHER", col3X, y3);
-          y3 += 8;
-
-          doc.text("HEADMASTER'S REMARKS", col3X, y3);
-          y3 += 4;
-          (
-            doc as jsPDF & {
-              setLineDash: (dash: number[], offset: number) => void;
-            }
-          ).setLineDash([1, 1], 0);
-          doc.line(col3X, y3, col3X + colWidth, y3);
-          y3 += 5;
-          doc.line(col3X, y3, col3X + colWidth, y3);
-          (
-            doc as jsPDF & {
-              setLineDash: (dash: number[], offset: number) => void;
-            }
-          ).setLineDash([], 0);
-          y3 += 4;
-
-          // --- Signatures (Aligned at bottom) ---
-          // Determine max Y to start signatures
-          const contentMaxY = Math.max(col1End, y2, y3) + 10;
-
-          // Class Teacher Signature (Col 2)
-          const sigY = contentMaxY + 15; // Space for signature
-          doc.setDrawColor(0);
-          doc.setLineWidth(0.2);
-          doc.line(col2X, sigY, col2X + colWidth, sigY);
-          doc.setFontSize(7);
-          doc.setFont("helvetica", "bold");
-          doc.text(
-            "Class Teacher's Signature",
-            col2X + colWidth / 2,
-            sigY + 4,
-            { align: "center" }
-          );
-
-          // Head Teacher Signature (Col 3)
-          if (schoolConfig.signatureEnabled && headSignatureDataUrl) {
-            const fmt: "JPEG" | "PNG" = headSignatureDataUrl.startsWith(
-              "data:image/jpeg"
-            )
-              ? "JPEG"
-              : "PNG";
-            // Center image in column
-            doc.addImage(
-              headSignatureDataUrl,
-              fmt,
-              col3X + 5,
-              sigY - 15,
-              colWidth - 10,
-              15
-            );
-          }
-          doc.line(col3X, sigY, col3X + colWidth, sigY);
-          doc.text("Head Teacher's Signature", col3X + colWidth / 2, sigY + 4, {
-            align: "center",
-          });
-
-          doc.setFont("helvetica", "italic");
-          doc.setTextColor(150);
-          doc.text("Generated by E-SBA [JHS]", col3X + colWidth / 2, sigY + 8, {
-            align: "center",
-          });
-          doc.setTextColor(0);
-        });
-        const filename = studentId
-          ? `Report_${studentId}.pdf`
-          : `Batch_Reports_${selectedClass}_${academicYear.replace(
-              "/",
-              "-"
-            )}.pdf`;
-        doc.save(filename);
-
-        // --- Auto-Print Logic ---
-        // Create a Blob from the PDF and open it in an invisible iframe to trigger the print dialog
-        const pdfBlob = doc.output("blob");
-        const blobUrl = URL.createObjectURL(pdfBlob);
-        const iframe = document.createElement("iframe");
-        iframe.style.display = "none";
-        iframe.src = blobUrl;
-        document.body.appendChild(iframe);
-        iframe.onload = () => {
-          if (iframe.contentWindow) {
-            iframe.contentWindow.print();
-          }
-        };
-        // Clean up the iframe and URL object after a delay
-        setTimeout(() => {
-          document.body.removeChild(iframe);
-          URL.revokeObjectURL(blobUrl);
-        }, 60000); // 1 minute delay to allow user to interact with print dialog
-      } catch (e) {
-        logger.error("Report PDF error", e);
-      }
-      setIsGeneratingDoc(false);
-    }, 100);
-  };
-
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setLogoError(null);
-    setIsProcessingLogo(true);
-    setLogoFeedback(null);
-    setLogoFile(null);
-    const validTypes = ["image/jpeg", "image/png", "image/svg+xml"];
-    if (!validTypes.includes(file.type)) {
-      setLogoError("Invalid file type.");
-      setIsProcessingLogo(false);
-      return;
-    }
-    if (file.size > 2 * 1024 * 1024) {
-      setLogoError("File too large.");
-      setIsProcessingLogo(false);
-      return;
-    }
-    setLogoFile(file);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d");
-        const maxDim = 300;
-        let width = img.width;
-        let height = img.height;
-        if (width > height) {
-          if (width > maxDim) {
-            height *= maxDim / width;
-            width = maxDim;
-          }
-        } else {
-          if (height > maxDim) {
-            width *= maxDim / height;
-            height = maxDim;
-          }
-        }
-        canvas.width = width;
-        canvas.height = height;
-        ctx?.drawImage(img, 0, 0, width, height);
-        setSchoolConfig((prev) => ({
-          ...prev,
-          logoUrl: canvas.toDataURL(file.type),
-        }));
-        setIsProcessingLogo(false);
-      };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const saveLogoToServer = async () => {
-    if (!logoFile) return;
-    setIsLogoUploading(true);
-    setLogoFeedback(null);
-    try {
-      const r = await apiClient.uploadSchoolLogo(logoFile);
-      setLogoFeedback(
-        r.ok ? "Logo saved successfully." : "Failed to save logo."
-      );
-      setLogoFile(null);
-    } catch (e) {
-      setLogoFeedback((e as Error).message || "Upload failed");
-    } finally {
-      setIsLogoUploading(false);
-    }
-  };
-
-  const rotateLogo = () => {
-    if (!schoolConfig.logoUrl) return;
-    setIsProcessingLogo(true);
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-      canvas.width = img.height;
-      canvas.height = img.width;
-      if (ctx) {
-        ctx.translate(canvas.width / 2, canvas.height / 2);
-        ctx.rotate((90 * Math.PI) / 180);
-        ctx.drawImage(img, -img.width / 2, -img.height / 2);
-      }
-      setSchoolConfig((prev) => ({ ...prev, logoUrl: canvas.toDataURL() }));
-      setIsProcessingLogo(false);
-    };
-    img.src = schoolConfig.logoUrl;
-  };
-
-  // Signature removal handled by SignatureUpload component via onChange(null)
-
-  const removeLogo = () => {
-    setSchoolConfig((prev) => ({ ...prev, logoUrl: null }));
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
 
   useEffect(() => {
     (async () => {
@@ -2336,275 +1685,8 @@ export default function App() {
     );
   };
 
-  const renderRankingReport = () => {
-    const raw = rankingData as unknown;
-    const rows: RankingRow[] = Array.isArray(raw)
-      ? (raw as RankingRow[])
-      : Array.isArray((raw as { data?: RankingRow[] }).data)
-      ? ((raw as { data?: RankingRow[] }).data as RankingRow[])
-      : [];
-    const total =
-      typeof (raw as { total?: number }).total === "number"
-        ? (raw as { total: number }).total
-        : rows.length;
-
-    return (
-      <div className="space-y-6 animate-in fade-in duration-500">
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => setCurrentView("home")}
-                className="p-2 hover:bg-slate-100 rounded-full transition-colors"
-                title="Back to Dashboard"
-              >
-                <ArrowLeft size={24} className="text-slate-600" />
-              </button>
-              <div>
-                <h2 className="text-2xl font-bold text-slate-800">
-                  Student Ranking Report
-                </h2>
-                <p className="text-slate-500 text-sm">
-                  Comprehensive performance analysis across streams
-                </p>
-              </div>
-            </div>
-
-            <div className="flex gap-4">
-              <select
-                value={rankingClassFilter}
-                onChange={(e) => {
-                  setRankingClassFilter(e.target.value);
-                  setRankingPage(1);
-                }}
-                className="p-2 border border-slate-300 rounded-md bg-slate-50"
-                title="Filter by Class"
-              >
-                <option value="JHS 1">JHS 1 (All Streams)</option>
-                <option value="JHS 2">JHS 2 (All Streams)</option>
-                <option value="JHS 3">JHS 3 (All Streams)</option>
-              </select>
-              <button
-                onClick={downloadRankingReport}
-                className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors"
-              >
-                <Download size={18} /> Download PDF
-              </button>
-              <button
-                onClick={() => window.print()}
-                className="flex items-center gap-2 bg-slate-800 text-white px-4 py-2 rounded-lg hover:bg-slate-900 transition-colors"
-              >
-                <Printer size={18} /> Print Report
-              </button>
-            </div>
-          </div>
-
-          {rankingError && (
-            <div className="mb-4 p-3 rounded-md bg-red-50 text-red-700 text-sm border border-red-100">
-              {rankingError.includes("Access denied")
-                ? "Access denied. Only Head Teacher accounts can view rankings."
-                : rankingError}
-            </div>
-          )}
-
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="p-3 text-left font-semibold text-slate-700">
-                    Rank
-                  </th>
-                  <th className="p-3 text-left font-semibold text-slate-700">
-                    Student Name
-                  </th>
-                  <th className="p-3 text-left font-semibold text-slate-700">
-                    Class
-                  </th>
-                  <th className="p-3 text-right font-semibold text-slate-700">
-                    Overall Score
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rankingLoading ? (
-                  <tr>
-                    <td colSpan={4} className="p-8 text-center text-slate-500">
-                      Loading rankings...
-                    </td>
-                  </tr>
-                ) : rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="p-8 text-center text-slate-500">
-                      No data found for this selection.
-                    </td>
-                  </tr>
-                ) : (
-                  rows.map((student) => (
-                    <tr
-                      key={student.student_id}
-                      className="border-b border-slate-100 hover:bg-slate-50"
-                    >
-                      <td className="p-3">
-                        <div
-                          className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
-                            student.position === 1
-                              ? "bg-yellow-100 text-yellow-700"
-                              : student.position === 2
-                              ? "bg-slate-200 text-slate-700"
-                              : student.position === 3
-                              ? "bg-orange-100 text-orange-700"
-                              : "bg-slate-50 text-slate-600"
-                          }`}
-                        >
-                          {student.position}
-                        </div>
-                      </td>
-                      <td className="p-3 font-medium text-slate-800">
-                        {student.surname}, {student.first_name}{" "}
-                        {student.middle_name}
-                      </td>
-                      <td className="p-3 text-slate-600">
-                        {student.class_name}
-                      </td>
-                      <td className="p-3 text-right font-mono font-medium text-slate-700">
-                        {student.overall_score.toFixed(2)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-              <tfoot className="bg-slate-100 font-bold text-slate-700 border-t-2 border-slate-200">
-                {(() => {
-                  let tCat1 = 0,
-                    tCat2 = 0,
-                    tGroup = 0,
-                    tProj = 0,
-                    tRawSBA = 0,
-                    tScaledSBA = 0,
-                    tExam = 0,
-                    tScaledExam = 0,
-                    tFinal = 0;
-                  let count = 0;
-                  filteredStudents.forEach((s) => {
-                    const m = marks[s.id]?.[activeSubject];
-                    if (m) {
-                      count++;
-                      tCat1 += m.cat1 || 0;
-                      tCat2 += m.cat2 || 0;
-                      tGroup += m.group || 0;
-                      tProj += m.project || 0;
-                      const rawSBA =
-                        m.cat1 + m.cat2 + m.cat3 + m.cat4 + m.group + m.project;
-                      tRawSBA += rawSBA;
-
-                      const scaledSBA = (rawSBA / 80) * schoolConfig.catWeight;
-                      tScaledSBA += scaledSBA;
-
-                      tExam += m.exam || 0;
-                      const scaledExam =
-                        (m.exam / 100) * schoolConfig.examWeight;
-                      tScaledExam += scaledExam;
-
-                      tFinal += Math.round(scaledSBA + scaledExam);
-                    }
-                  });
-
-                  const avg = (val: number) =>
-                    count > 0 ? (val / count).toFixed(1) : "-";
-
-                  return (
-                    <tr>
-                      <td
-                        colSpan={2}
-                        className="px-4 py-3 text-right uppercase text-xs tracking-wider"
-                      >
-                        Class Averages:
-                      </td>
-                      <td className="px-2 py-3 text-center text-xs">
-                        {avg(tCat1)}
-                      </td>
-                      <td className="px-2 py-3 text-center text-xs">
-                        {avg(tCat2)}
-                      </td>
-                      <td className="px-2 py-3 text-center text-xs bg-purple-50">
-                        {avg(tGroup)}
-                      </td>
-                      <td className="px-2 py-3 text-center text-xs bg-purple-50">
-                        {avg(tProj)}
-                      </td>
-                      <td className="px-2 py-3 text-center text-xs text-slate-500">
-                        {avg(tRawSBA)}
-                      </td>
-                      <td className="px-2 py-3 text-center text-xs text-green-700 bg-green-50">
-                        {avg(tScaledSBA)}
-                      </td>
-                      <td className="px-2 py-3 text-center text-xs bg-red-50">
-                        {avg(tExam)}
-                      </td>
-                      <td className="px-2 py-3 text-center text-xs text-green-700 bg-green-50">
-                        {avg(tScaledExam)}
-                      </td>
-                      <td className="px-4 py-3 text-center font-black text-sm">
-                        {avg(tFinal)}
-                      </td>
-                      <td colSpan={2}></td>
-                    </tr>
-                  );
-                })()}
-              </tfoot>
-            </table>
-          </div>
-
-          <div className="flex justify-between items-center mt-4">
-            <span className="text-sm text-slate-500">
-              Showing {(rankingPage - 1) * 50 + 1} to{" "}
-              {Math.min(rankingPage * 50, total)} of {total} students
-            </span>
-            <div className="flex gap-2">
-              <button
-                disabled={rankingPage === 1}
-                onClick={() => setRankingPage((p) => p - 1)}
-                className="px-3 py-1 border border-slate-300 rounded disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <button
-                disabled={rankingPage * 50 >= total}
-                onClick={() => setRankingPage((p) => p + 1)}
-                className="px-3 py-1 border border-slate-300 rounded disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-          </div>
-        </div>
-        <style>{`
-         @media print {
-           body * {
-             visibility: hidden;
-           }
-           .animate-in {
-             visibility: visible;
-             position: absolute;
-             left: 0;
-             top: 0;
-             width: 100%;
-           }
-           button {
-             display: none !important;
-           }
-           .shadow-sm, .shadow-md, .shadow-xl {
-             box-shadow: none !important;
-           }
-         }
-       `}</style>
-      </div>
-    );
-  };
-
   const renderHome = () => (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <ProgressStats />
       <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
         <div className="flex items-center justify-between mb-4">
           <div>
@@ -2860,6 +1942,7 @@ export default function App() {
           )}
         </div>
       </div>
+      <ProgressStats />
     </div>
   );
 
@@ -3035,45 +2118,6 @@ export default function App() {
                     </p>
                   </div>
                 </section>
-
-                {/* Grade Distribution Chart */}
-                <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm print:hidden">
-                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">
-                    Grade Distribution
-                  </h3>
-                  <div className="flex items-end justify-between h-32 gap-2">
-                    {gradingSystem.map((band) => {
-                      const count = gradeDistribution[band.grade] || 0;
-                      const height = count > 0 ? (count / maxCount) * 100 : 0;
-                      return (
-                        <div
-                          key={band.grade}
-                          className="flex flex-col items-center flex-1 group relative"
-                        >
-                          <div className="w-full bg-slate-100 rounded-t-sm relative h-full flex items-end">
-                            <div
-                              className={`w-full transition-all duration-500 ${
-                                count > 0 ? "bg-blue-500" : "bg-transparent"
-                              } hover:bg-blue-600 rounded-t-sm`}
-                              style={{ height: `${height}%` }}
-                            ></div>
-                            {count > 0 && (
-                              <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 text-xs font-bold text-slate-700 opacity-0 group-hover:opacity-100 transition-opacity">
-                                {count}
-                              </div>
-                            )}
-                          </div>
-                          <div className="mt-2 text-xs font-bold text-slate-600">
-                            {band.grade}
-                          </div>
-                          <div className="text-[10px] text-slate-400">
-                            {count}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
               </div>
             );
           })()}
@@ -3280,132 +2324,109 @@ export default function App() {
               })}
             </tbody>
             <tfoot className="bg-slate-100 font-bold text-slate-700 border-t-2 border-slate-200">
-              {(() => {
-                const totals = {
-                  cat1: [] as number[],
-                  cat2: [] as number[],
-                  cat3: [] as number[],
-                  cat4: [] as number[],
-                  group: [] as number[],
-                  project: [] as number[],
-                  rawSBA: [] as number[],
-                  scaledSBA: [] as number[],
-                  exam: [] as number[],
-                  scaledExam: [] as number[],
-                  final: [] as number[],
-                  attendance: [] as number[],
-                };
-
-                let count = 0;
-                filteredStudents.forEach((s) => {
-                  const m = marks[s.id]?.[activeSubject];
-                  const att = attendanceMap[s.id];
-                  if (att && att.total > 0) {
-                    totals.attendance.push((att.present / att.total) * 100);
-                  }
-                  if (m) {
-                    count++;
-                    if (m.cat1 !== undefined) totals.cat1.push(m.cat1);
-                    if (m.cat2 !== undefined) totals.cat2.push(m.cat2);
-                    if (m.cat3 !== undefined) totals.cat3.push(m.cat3);
-                    if (m.cat4 !== undefined) totals.cat4.push(m.cat4);
-                    if (m.group !== undefined) totals.group.push(m.group);
-                    if (m.project !== undefined) totals.project.push(m.project);
-
-                    const rawSBA =
-                      (m.cat1 || 0) +
-                      (m.cat2 || 0) +
-                      (m.cat3 || 0) +
-                      (m.cat4 || 0) +
-                      (m.group || 0) +
-                      (m.project || 0);
-                    totals.rawSBA.push(rawSBA);
-
-                    const scaledSBA = (rawSBA / 80) * schoolConfig.catWeight;
-                    totals.scaledSBA.push(scaledSBA);
-
-                    if (m.exam !== undefined) totals.exam.push(m.exam);
-                    const scaledExam =
-                      ((m.exam || 0) / 100) * schoolConfig.examWeight;
-                    totals.scaledExam.push(scaledExam);
-
-                    totals.final.push(Math.round(scaledSBA + scaledExam));
-                  }
-                });
-
-                const avg = (arr: number[]) =>
-                  arr.length > 0
-                    ? (arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1)
-                    : "-";
-                const max = (arr: number[]) =>
-                  arr.length > 0 ? Math.max(...arr).toFixed(1) : "-";
-                const min = (arr: number[]) =>
-                  arr.length > 0 ? Math.min(...arr).toFixed(1) : "-";
-                const cnt = (arr: number[]) => arr.length;
-
-                const renderRow = (
-                  label: string,
-                  fn: (arr: number[]) => string | number,
-                  bgClass = ""
-                ) => (
-                  <tr className={bgClass}>
-                    <td
-                      colSpan={2}
-                      className="px-4 py-2 text-right uppercase text-xs tracking-wider border-b border-slate-200"
-                    >
-                      {label}
-                    </td>
-                    <td className="px-2 py-2 text-center text-xs border-b border-slate-200">
-                      {fn(totals.cat1)}
-                    </td>
-                    <td className="px-2 py-2 text-center text-xs border-b border-slate-200">
-                      {fn(totals.cat2)}
-                    </td>
-                    <td className="px-2 py-2 text-center text-xs bg-purple-50 border-b border-slate-200">
-                      {fn(totals.group)}
-                    </td>
-                    <td className="px-2 py-2 text-center text-xs bg-purple-50 border-b border-slate-200">
-                      {fn(totals.project)}
-                    </td>
-                    <td className="px-2 py-2 text-center text-xs text-slate-500 border-b border-slate-200">
-                      {fn(totals.rawSBA)}
-                    </td>
-                    <td className="px-2 py-2 text-center text-xs text-green-700 bg-green-50 border-b border-slate-200">
-                      {fn(totals.scaledSBA)}
-                    </td>
-                    <td className="px-2 py-2 text-center text-xs bg-red-50 border-b border-slate-200">
-                      {fn(totals.exam)}
-                    </td>
-                    <td className="px-2 py-2 text-center text-xs text-green-700 bg-green-50 border-b border-slate-200">
-                      {fn(totals.scaledExam)}
-                    </td>
-                    <td className="px-4 py-2 text-center font-black text-sm border-b border-slate-200">
-                      {fn(totals.final)}
-                    </td>
-                    <td colSpan={2} className="border-b border-slate-200"></td>
-                    <td className="px-2 py-2 text-center text-xs bg-amber-50 border-b border-slate-200 border-l">
-                      {label === "Student Count:"
-                        ? cnt(totals.attendance)
-                        : fn(totals.attendance) === "-"
-                        ? "-"
-                        : `${fn(totals.attendance)}%`}
-                    </td>
-                  </tr>
-                );
-
-                return (
-                  <>
-                    {renderRow("Class Average:", avg, "bg-slate-50")}
-                    {renderRow("Highest Score:", max)}
-                    {renderRow("Lowest Score:", min)}
-                    {renderRow(
-                      "Student Count:",
-                      cnt,
-                      "bg-slate-50 text-slate-500"
-                    )}
-                  </>
-                );
-              })()}
+              {classStats && (
+                <>
+                  {[
+                    { label: "Class Average:", type: "avg", bg: "bg-slate-50" },
+                    { label: "Highest Score:", type: "max" },
+                    { label: "Lowest Score:", type: "min" },
+                    {
+                      label: "Student Count:",
+                      type: "cnt",
+                      bg: "bg-slate-50 text-slate-500",
+                    },
+                  ].map((row) => (
+                    <tr key={row.label} className={row.bg || ""}>
+                      <td
+                        colSpan={2}
+                        className="px-4 py-2 text-right uppercase text-xs tracking-wider border-b border-slate-200"
+                      >
+                        {row.label}
+                      </td>
+                      <td className="px-2 py-2 text-center text-xs border-b border-slate-200">
+                        {
+                          classStats.cat1[
+                            row.type as keyof typeof classStats.cat1
+                          ]
+                        }
+                      </td>
+                      <td className="px-2 py-2 text-center text-xs border-b border-slate-200">
+                        {
+                          classStats.cat2[
+                            row.type as keyof typeof classStats.cat2
+                          ]
+                        }
+                      </td>
+                      <td className="px-2 py-2 text-center text-xs bg-purple-50 border-b border-slate-200">
+                        {
+                          classStats.group[
+                            row.type as keyof typeof classStats.group
+                          ]
+                        }
+                      </td>
+                      <td className="px-2 py-2 text-center text-xs bg-purple-50 border-b border-slate-200">
+                        {
+                          classStats.project[
+                            row.type as keyof typeof classStats.project
+                          ]
+                        }
+                      </td>
+                      <td className="px-2 py-2 text-center text-xs text-slate-500 border-b border-slate-200">
+                        {
+                          classStats.rawSBA[
+                            row.type as keyof typeof classStats.rawSBA
+                          ]
+                        }
+                      </td>
+                      <td className="px-2 py-2 text-center text-xs text-green-700 bg-green-50 border-b border-slate-200">
+                        {
+                          classStats.scaledSBA[
+                            row.type as keyof typeof classStats.scaledSBA
+                          ]
+                        }
+                      </td>
+                      <td className="px-2 py-2 text-center text-xs bg-red-50 border-b border-slate-200">
+                        {
+                          classStats.exam[
+                            row.type as keyof typeof classStats.exam
+                          ]
+                        }
+                      </td>
+                      <td className="px-2 py-2 text-center text-xs text-green-700 bg-green-50 border-b border-slate-200">
+                        {
+                          classStats.scaledExam[
+                            row.type as keyof typeof classStats.scaledExam
+                          ]
+                        }
+                      </td>
+                      <td className="px-4 py-2 text-center font-black text-sm border-b border-slate-200">
+                        {
+                          classStats.final[
+                            row.type as keyof typeof classStats.final
+                          ]
+                        }
+                      </td>
+                      <td
+                        colSpan={2}
+                        className="border-b border-slate-200"
+                      ></td>
+                      <td className="px-2 py-2 text-center text-xs bg-amber-50 border-b border-slate-200 border-l">
+                        {row.type === "cnt"
+                          ? classStats.attendance.cnt
+                          : classStats.attendance[
+                              row.type as keyof typeof classStats.attendance
+                            ] === "-"
+                          ? "-"
+                          : `${
+                              classStats.attendance[
+                                row.type as keyof typeof classStats.attendance
+                              ]
+                            }%`}
+                      </td>
+                    </tr>
+                  ))}
+                </>
+              )}
             </tfoot>
           </table>
         </div>
@@ -3431,220 +2452,9 @@ export default function App() {
   };
   // Class remarks and attendance data intentionally removed per data purge request
 
-  const [talentRemarkError, setTalentRemarkError] = useState<string | null>(
-    null
-  );
-  const [talentRemarkOptionsGrouped, setTalentRemarkOptionsGrouped] = useState<
-    Array<{ group: string; options: string[] }>
-  >([
-    {
-      group: "Positive",
-      options: [
-        "Shows exceptional talent in subject activities",
-        "Consistently demonstrates creativity",
-        "Strong leadership in group tasks",
-        "Excellent problem-solving skills",
-      ],
-    },
-    {
-      group: "Improvement",
-      options: [
-        "Could benefit from additional practice",
-        "Needs support to build confidence",
-        "Should focus more during class activities",
-        "Improve time management in assignments",
-      ],
-    },
-    { group: "Other", options: ["Other"] },
-  ]);
-  const [teacherRemarkOptions] = useState<string[]>([
-    "Excellent attitude",
-    "Consistent effort",
-    "Improving steadily",
-    "Cooperative",
-    "Participative",
-    "Needs improvement",
-    "Irregular homework",
-    "Late submissions",
-    "Punctual",
-    "Organized",
-    "Other",
-  ]);
-
-  const [teacherRemarkError, setTeacherRemarkError] = useState<string | null>(
-    null
-  );
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const data = await apiClient.getTalentRemarks();
-        const groups = Array.isArray(data.groups) ? data.groups : [];
-        if (groups.length > 0) {
-          setTalentRemarkOptionsGrouped(groups);
-          return;
-        }
-      } catch (e) {
-        logger.warn("talent_remarks_fetch_failed", e);
-      }
-      logger.info("talent_remarks_fallback_default");
-      setTalentRemarkOptionsGrouped([
-        {
-          group: "Positive",
-          options: [
-            "Shows exceptional talent in subject activities",
-            "Consistently demonstrates creativity",
-            "Strong leadership in group tasks",
-            "Excellent problem-solving skills",
-          ],
-        },
-        {
-          group: "Improvement",
-          options: [
-            "Could benefit from additional practice",
-            "Needs support to build confidence",
-            "Should focus more during class activities",
-            "Improve time management in assignments",
-          ],
-        },
-        { group: "Other", options: ["Other"] },
-      ]);
-    })();
-  }, []);
-
-  const _generateAttendanceReportPDF = (studentId: string) => {
-    const s = students.find((x) => x.id === studentId);
-    if (!s) return;
-    const doc = new jsPDF({ unit: "pt", format: "a4" });
-    const pageW = doc.internal.pageSize.getWidth();
-    const margin = 72;
-    let y = margin;
-    doc.setFont("times", "bold");
-    doc.setFontSize(16);
-    doc.text(schoolConfig.name || "", pageW / 2, y, { align: "center" });
-    y += 20;
-    doc.setFontSize(12);
-    doc.setFont("times", "normal");
-    doc.text(schoolConfig.address || "", pageW / 2, y, { align: "center" });
-    y += 40;
-    doc.setFont("times", "bold");
-    doc.setFontSize(16);
-    doc.text("Student Attendance Report", pageW / 2, y, { align: "center" });
-    y += 28;
-    doc.setFontSize(12);
-    doc.setFont("times", "normal");
-    doc.text(
-      `Student: ${s.surname}, ${s.firstName} ${s.middleName}`,
-      margin,
-      y
-    );
-    y += 18;
-    doc.text(
-      `Class: ${s.class}    Term: ${term}    Year: ${academicYear}`,
-      margin,
-      y
-    );
-    y += 28;
-    const lineA = "_".repeat(25);
-    const lineB = "_".repeat(25);
-    doc.setFont("times", "bold");
-    doc.text(`Attendance: ${lineA} out of ${lineB}`, margin, y);
-    y += 30;
-    doc.setDrawColor(60);
-    doc.line(margin, y, pageW - margin, y);
-    y += 24;
-    doc.setFontSize(14);
-    doc.text("Talent and Interest:", margin, y);
-    y += 22;
-    doc.setFontSize(12);
-    const talents = [
-      "Sports",
-      "Arts",
-      "Music",
-      "Academics",
-      "Leadership",
-      "Technology",
-      "Public Speaking",
-      "Community Service",
-    ];
-    const box = 10;
-    let x = margin;
-    talents.forEach((t, i) => {
-      doc.rect(x, y - box + 2, box, box);
-      doc.text(t, x + box + 8, y + 2);
-      if ((i + 1) % 2 === 0) {
-        x = margin;
-        y += 24;
-      } else {
-        x = pageW / 2;
-      }
-    });
-    y += 28;
-    doc.text("Other:", margin, y);
-    doc.text("_".repeat(20), margin + 50, y);
-    y += 32;
-    doc.setFontSize(14);
-    doc.text("Class Teacher's Remarks:", margin, y);
-    y += 22;
-    doc.setFontSize(12);
-    const teacherOpts = [
-      "Calm",
-      "Respectful",
-      "Diligent",
-      "Cooperative",
-      "Needs Improvement",
-      "Participative",
-      "Punctual",
-      "Organized",
-    ];
-    x = margin;
-    teacherOpts.forEach((t, i) => {
-      doc.rect(x, y - box + 2, box, box);
-      doc.text(t, x + box + 8, y + 2);
-      if ((i + 1) % 2 === 0) {
-        x = margin;
-        y += 24;
-      } else {
-        x = pageW / 2;
-      }
-    });
-    y += 30;
-    doc.rect(margin, y, pageW - margin * 2, 90);
-    y += 110;
-    doc.setFontSize(14);
-    doc.text("Headmaster's Remarks:", margin, y);
-    y += 22;
-    doc.setFontSize(12);
-    const headOpts = [
-      "Must backup",
-      "Has Improved",
-      "Can do better",
-      "Exemplary",
-      "Needs Monitoring",
-      "Shows Potential",
-      "Consistent Performer",
-    ];
-    x = margin;
-    headOpts.forEach((t, i) => {
-      doc.rect(x, y - box + 2, box, box);
-      doc.text(t, x + box + 8, y + 2);
-      if ((i + 1) % 2 === 0) {
-        x = margin;
-        y += 24;
-      } else {
-        x = pageW / 2;
-      }
-    });
-    y += 30;
-    doc.text("Signature:", margin, y);
-    doc.line(margin + 70, y, margin + 250, y);
-    doc.text("Date:", pageW - margin - 180, y);
-    doc.line(pageW - margin - 130, y, pageW - margin - 20, y);
-    doc.save(`Attendance_Report_${s.id}.pdf`);
-  };
   const [isGeneratingTemplate, setIsGeneratingTemplate] = useState(false);
   const [templateStatus, setTemplateStatus] = useState("");
-  const downloadSubjectTemplate = () => {
+  const downloadSubjectTemplate = async () => {
     try {
       setIsGeneratingTemplate(true);
       setTemplateStatus("Generating template...");
@@ -3671,6 +2481,7 @@ export default function App() {
         "",
       ]);
       const data = [headers, ...rows];
+      const XLSX = await import("xlsx");
       const ws = XLSX.utils.aoa_to_sheet(data);
       const wb = XLSX.utils.book_new();
       const sheetName = `${activeSubject || "Subject"} Template`;
@@ -3692,7 +2503,7 @@ export default function App() {
   const exportSubjectSheetToExcel = () => {
     setIsGeneratingDoc(true);
     setDocStatus("Preparing Excel file...");
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
         const headers = [
           "student_id",
@@ -3912,6 +2723,7 @@ export default function App() {
         ]);
 
         const data = [headers, ...rows];
+        const XLSX = await import("xlsx");
         const ws = XLSX.utils.aoa_to_sheet(data);
         for (let r = 1; r <= rows.length; r++) {
           const sbaCell = XLSX.utils.encode_cell({ r, c: 9 });
@@ -4003,8 +2815,9 @@ export default function App() {
                   return;
                 }
                 const reader = new FileReader();
-                reader.onload = () => {
+                reader.onload = async () => {
                   try {
+                    const XLSX = await import("xlsx");
                     const data = new Uint8Array(reader.result as ArrayBuffer);
                     const wb = XLSX.read(data, { type: "array" });
                     const ws = wb.Sheets[wb.SheetNames[0]];
@@ -4047,8 +2860,9 @@ export default function App() {
                   return;
                 }
                 const reader = new FileReader();
-                reader.onload = () => {
+                reader.onload = async () => {
                   try {
+                    const XLSX = await import("xlsx");
                     if (["xlsx", "xls"].includes(ext)) {
                       const data = new Uint8Array(reader.result as ArrayBuffer);
                       const wb = XLSX.read(data, { type: "array" });
@@ -4204,6 +3018,7 @@ export default function App() {
                     });
                   const buf = await readBuf();
                   const data = new Uint8Array(buf);
+                  const XLSX = await import("xlsx");
                   const wb = XLSX.read(data, { type: "array" });
                   const ws = wb.Sheets[wb.SheetNames[0]];
                   const arr = XLSX.utils.sheet_to_json(ws) as Record<
@@ -4514,739 +3329,6 @@ export default function App() {
               )}
               Upload & Map
             </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderReportCard = () => {
-    const effectiveReportId = reportId || filteredStudents[0]?.id || "";
-    const student = students.find((s) => s.id === effectiveReportId);
-    const subjectStats: Record<string, { rank: string; avg: string }> = {};
-    SUBJECTS.forEach((subj) => {
-      let totalScore = 0;
-      let count = 0;
-      const allMarks = filteredStudents
-        .map((s) => {
-          const m = marks[s.id]?.[subj];
-          if (!m) return { id: s.id, score: 0, hasMark: false };
-          const rawSBA =
-            ((m.cat1 + m.cat2 + m.cat3 + m.cat4 + m.group + m.project) / 80) *
-            schoolConfig.catWeight;
-          const rawExam = (m.exam / 100) * schoolConfig.examWeight;
-          const score = Math.round(rawSBA + rawExam);
-          // Only count towards average if there is some data (simple heuristic: score > 0 or explicit check)
-          // Ideally we check if mark object exists, which we did.
-          // However, existing logic returned score: 0 if !m.
-          if (m) {
-            totalScore += score;
-            count++;
-          }
-          return { id: s.id, score, hasMark: !!m };
-        })
-        .sort((a, b) => b.score - a.score);
-
-      const rankIndex = allMarks.findIndex((x) => x.id === effectiveReportId);
-      subjectStats[subj] = {
-        rank: rankIndex !== -1 ? getOrdinal(rankIndex + 1) : "-",
-        avg: count > 0 ? (totalScore / count).toFixed(1) : "-",
-      };
-    });
-    if (!student)
-      return (
-        <div className="p-8 text-center">
-          No Active Students to Report
-          <div
-            data-testid="headmaster-underscores"
-            className="text-base font-semibold mt-4"
-          >
-            {"_".repeat(100)}
-          </div>
-          <div className="mt-6 bg-white p-6 rounded-lg border border-slate-200 max-w-4xl mx-auto text-left">
-            <h3 className="text-lg font-bold text-slate-800 mb-4">
-              Grading Overview
-            </h3>
-            <div className="mt-4 text-xs text-slate-600">
-              <div className="font-semibold mb-2">Grading Scale</div>
-            </div>
-          </div>
-          <div className="mt-8 bg-white p-6 rounded-lg border border-slate-200 text-left max-w-3xl mx-auto">
-            <div className="mb-4 text-lg font-bold text-slate-800">
-              Talent and Interest:
-            </div>
-            <label htmlFor="talent-remark" className="text-slate-700">
-              Select template
-            </label>
-            <select
-              id="talent-remark"
-              value={talentRemark}
-              onChange={(e) => {
-                setTalentRemark(e.target.value);
-                const err = e.target.value ? null : "Required";
-                setTalentRemarkError(err);
-                logger.info("talent_remark_changed", {
-                  value: e.target.value,
-                });
-              }}
-              className={`w-full border rounded p-2 bg-white mb-3 ${
-                talentRemarkError ? "border-red-500" : "border-slate-300"
-              }`}
-              aria-label="Talent and interest remark"
-              aria-errormessage="talent-remark-error"
-              onInvalid={() => setTalentRemarkError("Required")}
-              required
-            >
-              <option value="" title="Required">
-                Select a template
-              </option>
-              {talentRemarkOptionsGrouped.map((g) => (
-                <optgroup key={g.group} label={g.group}>
-                  {g.options.map((opt) => (
-                    <option key={`${g.group}-${opt}`} value={opt} title={opt}>
-                      {opt}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-            {talentRemarkError && (
-              <p
-                id="talent-remark-error"
-                className="text-red-600 text-sm mt-1"
-                role="alert"
-              >
-                {talentRemarkError}
-              </p>
-            )}
-            {talentRemark === "Other" && (
-              <input
-                id="talent-remark-other-empty"
-                value={talentRemarkOther}
-                onChange={(e) => {
-                  setTalentRemarkOther(e.target.value);
-                  const err =
-                    e.target.value.length >= 20
-                      ? null
-                      : "Minimum 20 characters";
-                  setTalentRemarkError(err);
-                }}
-                className={`w-full border rounded p-2 ${
-                  talentRemarkError ? "border-red-500" : "border-slate-300"
-                }`}
-                aria-label="Custom talent remark"
-                placeholder="Specify other (min 20 characters)"
-              />
-            )}
-            {!talentRemarkError && talentRemark && (
-              <p className="text-xs text-green-700">Valid</p>
-            )}
-            <label
-              htmlFor="teacher-remark"
-              className="text-slate-700 mt-6 block"
-            >
-              Select remark
-            </label>
-            <select
-              id="teacher-remark"
-              data-testid="teacher-remark-select"
-              value={teacherRemark}
-              onChange={(e) => {
-                setTeacherRemark(e.target.value);
-                setTeacherRemarkError(e.target.value ? null : "Required");
-                logger.info("teacher_remark_changed", {
-                  value: e.target.value,
-                });
-              }}
-              className="w-full border border-slate-300 rounded p-2 bg-white mb-3"
-              aria-label="Teacher remark"
-              required
-            >
-              <option value="" title="Required">
-                Select a remark
-              </option>
-              {teacherRemarkOptions.map((opt) => (
-                <option key={opt} value={opt} title={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
-            {teacherRemark === "Other" && (
-              <input
-                id="teacher-remark-other-empty"
-                value={teacherRemarkOther}
-                onChange={(e) => setTeacherRemarkOther(e.target.value)}
-                className="w-full border border-slate-300 rounded p-2"
-                aria-label="Custom teacher remark"
-                placeholder="Specify other remark"
-              />
-            )}
-            {teacherRemarkError && (
-              <p className="text-xs text-red-600 mt-1">{teacherRemarkError}</p>
-            )}
-          </div>
-        </div>
-      );
-    return (
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200 flex items-center space-x-4">
-          <Search className="text-slate-400" />
-          <select
-            className="flex-1 p-2 bg-transparent outline-none"
-            value={effectiveReportId}
-            onChange={(e) => setReportId(e.target.value)}
-            aria-label="Select student for report"
-          >
-            {filteredStudents.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.id} - {s.surname}, {s.firstName}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => generateReportCardPDF(student.id)}
-            disabled={isGeneratingDoc}
-            className="flex items-center gap-2 px-3 py-2 bg-white border border-blue-200 text-blue-700 hover:bg-blue-50 rounded-lg text-sm font-medium transition-colors"
-          >
-            {isGeneratingDoc ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <Printer size={16} />
-            )}
-            <span>Print Single</span>
-          </button>
-          <button
-            onClick={() => generateReportCardPDF(null)}
-            disabled={isGeneratingDoc}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg text-sm font-medium shadow-sm hover:shadow transition-all"
-          >
-            {isGeneratingDoc ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <Database size={16} />
-            )}
-            <span>Batch Print ({filteredStudents.length})</span>
-          </button>
-        </div>
-        <div className="bg-white p-8 shadow-lg border border-slate-200 min-h-[800px]">
-          <div className="text-center mb-6 relative">
-            <div className="flex justify-center mb-2">
-              {schoolConfig.logoUrl ? (
-                <img
-                  src={schoolConfig.logoUrl}
-                  alt="School Logo"
-                  className="h-24 w-24 object-contain"
-                />
-              ) : (
-                <GraduationCap size={48} className="text-blue-900" />
-              )}
-            </div>
-            <h1 className="text-3xl font-black text-slate-900 uppercase tracking-widest px-4">
-              {schoolConfig.name}
-            </h1>
-            <p className="text-sm text-slate-600 mt-1 px-4">
-              {schoolConfig.address}
-            </p>
-            <p className="text-base italic font-serif text-slate-700 mt-2 px-4 uppercase tracking-widest">
-              "{schoolConfig.motto}"
-            </p>
-            <div className="border-b border-slate-800 my-4"></div>
-            <h2 className="text-2xl font-bold text-slate-900 uppercase tracking-widest py-2">
-              TERMINAL REPORT
-            </h2>
-            <div className="border-b border-slate-800 mb-6"></div>
-          </div>
-
-          <div className="mb-6 print:hidden">
-            <ProgressBar
-              scope="class"
-              className={selectedClass}
-              academicYear={academicYear}
-              term={term}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4 text-sm mb-6 border border-slate-300 p-4 rounded bg-slate-50">
-            <div>
-              <span className="font-bold text-slate-500">Name:</span>{" "}
-              {student.surname}, {student.firstName} {student.middleName}
-            </div>
-            <div>
-              <span className="font-bold text-slate-500">ID:</span> {student.id}
-            </div>
-            <div>
-              <span className="font-bold text-slate-500">Class:</span>{" "}
-              {student.class}
-            </div>
-            <div>
-              <span className="font-bold text-slate-500">Term:</span> {term},{" "}
-              {academicYear}
-            </div>
-            <div>
-              <span className="font-bold text-slate-500">DOB:</span>{" "}
-              {student.dob}
-            </div>
-            <div>
-              <span className="font-bold text-slate-500">Contact:</span>{" "}
-              {student.guardianContact}
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse border border-slate-300">
-              <thead>
-                <tr className="bg-slate-100 text-slate-800">
-                  <th className="border border-slate-300 p-2 text-left">
-                    Subject
-                  </th>
-                  <th className="border border-slate-300 p-2 text-center">
-                    Class ({schoolConfig.catWeight}%)
-                  </th>
-                  <th className="border border-slate-300 p-2 text-center">
-                    Exam ({schoolConfig.examWeight}%)
-                  </th>
-                  <th className="border border-slate-300 p-2 text-center">
-                    Total
-                  </th>
-                  <th className="border border-slate-300 p-2 text-center">
-                    Grade
-                  </th>
-                  <th className="border border-slate-300 p-2 text-center bg-blue-50">
-                    Class Avg
-                  </th>
-                  <th className="border border-slate-300 p-2 text-center">
-                    Pos.
-                  </th>
-                  <th className="border border-slate-300 p-2 text-left">
-                    Remark
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {SUBJECTS.map((subj) => {
-                  const m = marks[student.id]?.[subj];
-                  if (!m)
-                    return (
-                      <tr key={subj}>
-                        <td className="border border-slate-300 p-2 font-medium">
-                          {subj}
-                        </td>
-                        <td
-                          colSpan={7}
-                          className="border border-slate-300 p-2 text-center text-slate-400"
-                        >
-                          Not Graded
-                        </td>
-                      </tr>
-                    );
-                  const rawSBA =
-                    ((m.cat1 + m.cat2 + m.cat3 + m.cat4 + m.group + m.project) /
-                      80) *
-                    schoolConfig.catWeight;
-                  const rawExam = (m.exam / 100) * schoolConfig.examWeight;
-                  const final = Math.round(rawSBA + rawExam);
-                  const g = calculateGrade(final);
-                  return (
-                    <tr key={subj}>
-                      <td className="border border-slate-300 p-2 font-medium">
-                        {subj}
-                      </td>
-                      <td className="border border-slate-300 p-2 text-center">
-                        {rawSBA.toFixed(1)}
-                      </td>
-                      <td className="border border-slate-300 p-2 text-center">
-                        {rawExam.toFixed(1)}
-                      </td>
-                      <td className="border border-slate-300 p-2 text-center font-bold">
-                        {final}
-                      </td>
-                      <td className="border border-slate-300 p-2 text-center font-bold text-blue-700">
-                        {g.grade}
-                      </td>
-                      <td className="border border-slate-300 p-2 text-center text-xs bg-blue-50 font-semibold text-slate-600">
-                        {subjectStats[subj]?.avg || "-"}
-                      </td>
-                      <td className="border border-slate-300 p-2 text-center text-xs">
-                        {subjectStats[subj]?.rank || "-"}
-                      </td>
-                      <td className="border border-slate-300 p-2 text-xs">
-                        {g.desc}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div className="mt-6 bg-white p-6 rounded-lg border border-slate-200">
-            <h3 className="text-lg font-bold text-slate-800 mb-6 border-b border-slate-100 pb-4">
-              Report Overview
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              {/* Column 1: Grading System */}
-              <div className="flex flex-col space-y-4">
-                <div className="font-bold text-slate-700 text-sm uppercase tracking-wider border-b-2 border-slate-100 pb-2">
-                  Grading System
-                </div>
-                <div className="flex-1">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="text-left text-slate-500 border-b border-slate-100">
-                        <th className="pb-2 font-semibold">Grade</th>
-                        <th className="pb-2 font-semibold">Range</th>
-                        <th className="pb-2 font-semibold">Remark</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {gradingSystem.map((band) => (
-                        <tr key={`${band.grade}-${band.min}`}>
-                          <td className="py-2 font-bold text-slate-700">
-                            {band.grade}
-                          </td>
-                          <td className="py-2 text-slate-600">
-                            {band.min} – {band.max}
-                          </td>
-                          <td className="py-2 text-slate-600">{band.desc}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Column 2: Student Report */}
-              <div className="flex flex-col space-y-4">
-                <div className="font-bold text-slate-700 text-sm uppercase tracking-wider border-b-2 border-slate-100 pb-2">
-                  Student Report
-                </div>
-
-                <div className="space-y-4 flex-1">
-                  {/* Attendance */}
-                  <div
-                    className={`bg-slate-50 p-3 rounded border border-slate-100 relative ${
-                      user?.role === "CLASS"
-                        ? "cursor-not-allowed opacity-80"
-                        : ""
-                    }`}
-                    onClickCapture={(e) => {
-                      if (user?.role === "CLASS") {
-                        e.stopPropagation();
-                        alert(
-                          "Access Denied: You do not have permission to edit Attendance."
-                        );
-                      }
-                    }}
-                    title={
-                      user?.role === "CLASS"
-                        ? "View Only: Attendance is managed by Administration"
-                        : "Attendance"
-                    }
-                  >
-                    <div className="text-xs font-semibold text-slate-600 mb-2">
-                      ATTENDANCE
-                    </div>
-                    <div className="flex items-end gap-2 text-xs text-slate-600 justify-center">
-                      <input
-                        type="number"
-                        min="0"
-                        className={`w-16 border-b border-slate-400 bg-transparent text-center focus:outline-none focus:border-blue-500 px-1 ${
-                          user?.role === "CLASS" ? "pointer-events-none" : ""
-                        }`}
-                        placeholder="0"
-                        value={attendancePresent}
-                        onChange={(e) => setAttendancePresent(e.target.value)}
-                        aria-label="Days present"
-                        readOnly={user?.role === "CLASS"}
-                        tabIndex={user?.role === "CLASS" ? -1 : 0}
-                      />
-                      <span className="mb-1 font-medium">out of</span>
-                      <input
-                        type="number"
-                        min="0"
-                        className={`w-16 border-b border-slate-400 bg-transparent text-center focus:outline-none focus:border-blue-500 px-1 ${
-                          user?.role === "CLASS" ? "pointer-events-none" : ""
-                        }`}
-                        placeholder="0"
-                        value={attendanceTotal}
-                        onChange={(e) => setAttendanceTotal(e.target.value)}
-                        aria-label="Total days"
-                        readOnly={user?.role === "CLASS"}
-                        tabIndex={user?.role === "CLASS" ? -1 : 0}
-                      />
-                    </div>
-                    {Number(attendancePresent) && Number(attendanceTotal) ? (
-                      <div className="text-center mt-1">
-                        <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
-                          {(
-                            (Number(attendancePresent) /
-                              Number(attendanceTotal)) *
-                            100
-                          ).toFixed(1)}
-                          % Present
-                        </span>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  {/* Talent & Teacher Remark Section (Editable by Class Teacher) */}
-                  <div
-                    className={`transition-all duration-200 rounded-lg ${
-                      user?.role === "CLASS" || hasTalentChanges
-                        ? "ring-2 ring-blue-100 bg-blue-50/30 p-3 -mx-3 border border-blue-200 border-dashed"
-                        : ""
-                    }`}
-                  >
-                    {/* Talent */}
-                    <div>
-                      <label
-                        htmlFor="talent-remark"
-                        className="block text-xs font-bold text-slate-700 mb-1.5 flex justify-between"
-                      >
-                        <span>TALENT & INTEREST</span>
-                        {(user?.role === "CLASS" || hasTalentChanges) && (
-                          <span className="text-[10px] text-blue-600 font-normal bg-blue-100 px-1.5 py-0.5 rounded">
-                            Editable
-                          </span>
-                        )}
-                      </label>
-                      <select
-                        id="talent-remark"
-                        value={talentRemark}
-                        onChange={(e) => {
-                          setTalentRemark(e.target.value);
-                          const err = e.target.value ? null : "Required";
-                          setTalentRemarkError(err);
-                          logger.info("talent_remark_changed", {
-                            value: e.target.value,
-                          });
-                        }}
-                        className={`w-full text-xs border-b border-slate-300 rounded-none p-2 bg-transparent focus:outline-none focus:border-blue-500 ${
-                          talentRemarkError ? "border-red-500" : ""
-                        }`}
-                        aria-label="Talent and interest remark"
-                        aria-errormessage="talent-remark-error-report"
-                        onInvalid={() => setTalentRemarkError("Required")}
-                        required
-                      >
-                        <option value="" title="Required">
-                          Select a template
-                        </option>
-                        {talentRemarkOptionsGrouped.map((g) => (
-                          <optgroup key={g.group} label={g.group}>
-                            {g.options.map((opt) => (
-                              <option
-                                key={`${g.group}-${opt}`}
-                                value={opt}
-                                title={opt}
-                              >
-                                {opt}
-                              </option>
-                            ))}
-                          </optgroup>
-                        ))}
-                      </select>
-                      {/* Additional underscores for visual separation */}
-                      <div className="border-b border-slate-200 h-8 w-full"></div>
-                      <div className="border-b border-slate-200 h-8 w-full"></div>
-
-                      {talentRemarkError && (
-                        <p
-                          id="talent-remark-error-report"
-                          className="text-red-600 text-xs mt-1"
-                          role="alert"
-                        >
-                          {talentRemarkError}
-                        </p>
-                      )}
-                      {talentRemark === "Other" && (
-                        <input
-                          id="talent-remark-other-report"
-                          value={talentRemarkOther}
-                          onChange={(e) => {
-                            setTalentRemarkOther(e.target.value);
-                            const err =
-                              e.target.value.length >= 20
-                                ? null
-                                : "Minimum 20 characters";
-                            setTalentRemarkError(err);
-                          }}
-                          className={`w-full text-xs border-b border-slate-300 rounded-none p-2 mt-2 bg-transparent focus:outline-none focus:border-blue-500 ${
-                            talentRemarkError ? "border-red-500" : ""
-                          }`}
-                          aria-label="Custom talent remark"
-                          placeholder="Specify other (min 20 characters)"
-                        />
-                      )}
-                      {!talentRemarkError && talentRemark && (
-                        <p className="text-xs text-green-700 mt-1">Valid</p>
-                      )}
-                    </div>
-
-                    {/* Class Teacher Remark */}
-                    <div className="mt-4 relative">
-                      {user?.role === "CLASS" && (
-                        <div
-                          className="absolute inset-0 z-10 cursor-not-allowed"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            alert(
-                              "Access Denied: All sections except 'Talent and Interest' are locked."
-                            );
-                          }}
-                          title="View Only: Locked"
-                        ></div>
-                      )}
-                      <label
-                        htmlFor="teacher-remark"
-                        className="block text-xs font-bold text-slate-700 mb-1.5"
-                      >
-                        CLASS TEACHER'S REMARK
-                      </label>
-                      <select
-                        id="teacher-remark"
-                        data-testid="teacher-remark-select"
-                        value={teacherRemark}
-                        onChange={(e) => {
-                          setTeacherRemark(e.target.value);
-                          setTeacherRemarkError(
-                            e.target.value ? null : "Required"
-                          );
-                          logger.info("teacher_remark_changed", {
-                            value: e.target.value,
-                          });
-                        }}
-                        className={`w-full text-xs border-b border-slate-300 rounded-none p-2 bg-transparent focus:outline-none focus:border-blue-500 ${
-                          user?.role === "CLASS" ? "opacity-60" : ""
-                        }`}
-                        aria-label="Teacher remark"
-                        required
-                        disabled={user?.role === "CLASS"}
-                      >
-                        <option value="" title="Required">
-                          Select a remark
-                        </option>
-                        {teacherRemarkOptions.map((opt) => (
-                          <option key={opt} value={opt} title={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                      {/* Extended underscores for writing space */}
-                      <div className="border-b border-slate-200 h-8 w-full"></div>
-                      <div className="border-b border-slate-200 h-8 w-full"></div>
-                      <div className="border-b border-slate-200 h-8 w-full"></div>
-
-                      {teacherRemark === "Other" && (
-                        <input
-                          id="teacher-remark-other-report"
-                          value={teacherRemarkOther}
-                          onChange={(e) =>
-                            setTeacherRemarkOther(e.target.value)
-                          }
-                          className="w-full text-xs border-b border-slate-300 rounded-none p-2 mt-2 bg-transparent focus:outline-none focus:border-blue-500"
-                          aria-label="Custom teacher remark"
-                          placeholder="Specify other remark"
-                        />
-                      )}
-                      {teacherRemarkError && (
-                        <p className="text-xs text-red-600 mt-1">
-                          {teacherRemarkError}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="mt-4 flex gap-2 justify-end print:hidden">
-                      {hasTalentChanges && (
-                        <button
-                          onClick={handleCancelTalent}
-                          className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors"
-                          title="Discard changes"
-                        >
-                          Cancel
-                        </button>
-                      )}
-                      <button
-                        id="save-talent-btn"
-                        onClick={handleSaveTalent}
-                        disabled={!hasTalentChanges || isTalentSaving}
-                        className={`px-3 py-1.5 text-xs font-bold text-white rounded flex items-center gap-1.5 transition-all shadow-sm ${
-                          !hasTalentChanges || isTalentSaving
-                            ? "bg-slate-400 cursor-not-allowed opacity-70"
-                            : "bg-blue-600 hover:bg-blue-700 hover:shadow-md active:transform active:scale-95"
-                        }`}
-                        title="Save changes to Talent & Interest"
-                      >
-                        {isTalentSaving ? (
-                          <Loader2 size={12} className="animate-spin" />
-                        ) : (
-                          <Save size={12} />
-                        )}
-                        <span>
-                          {isTalentSaving ? "Saving..." : "Save Changes"}
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Class Teacher Signature */}
-                <div className="pt-4 mt-auto">
-                  <div className="h-16 mb-2"></div>
-                  <div className="border-t border-slate-300 pt-2 text-center">
-                    <p className="font-bold text-xs text-slate-800">
-                      Class Teacher's Signature
-                    </p>
-                    <p className="text-[10px] text-slate-400 mt-1 italic invisible">
-                      Generated by E-SBA [JHS]
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Column 3: Head Teacher */}
-              <div className="flex flex-col space-y-4">
-                <div className="font-bold text-slate-700 text-sm uppercase tracking-wider border-b-2 border-slate-100 pb-2">
-                  Head Teacher
-                </div>
-
-                <div className="space-y-6 flex-1">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-2">
-                      HEADMASTER'S REMARKS
-                    </label>
-                    <div className="space-y-4">
-                      <div className="w-full border-b border-slate-300 border-dashed h-6"></div>
-                      <div className="w-full border-b border-slate-300 border-dashed h-6"></div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Head Teacher Signature */}
-                <div className="pt-4 mt-auto">
-                  <div className="h-16 mb-2 flex items-end justify-center">
-                    {schoolConfig.signatureEnabled &&
-                    schoolConfig.headSignatureUrl ? (
-                      <img
-                        src={schoolConfig.headSignatureUrl}
-                        alt="Signature"
-                        className="max-h-16 object-contain"
-                      />
-                    ) : (
-                      <div className="h-12 w-full"></div>
-                    )}
-                  </div>
-                  <div className="border-t border-slate-300 pt-2 text-center">
-                    <p className="font-bold text-xs text-slate-800">
-                      Head Teacher's Signature
-                    </p>
-                    <p className="text-[10px] text-slate-400 mt-1 italic">
-                      Generated by E-SBA [JHS]
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -6121,13 +4203,30 @@ export default function App() {
                 <th className="p-4 text-left">First Name</th>
                 <th className="p-4 text-left">Middle Name</th>
                 <th className="p-4 text-left">Gender</th>
-                <th className="p-4 text-left">Class</th>
+                <th className="p-4 text-left">
+                  <div className="flex items-center gap-2">
+                    Class
+                    <select
+                      value={selectedClass}
+                      onChange={(e) => setSelectedClass(e.target.value)}
+                      className="ml-2 p-1 text-xs border border-slate-300 rounded bg-white text-slate-700 font-normal"
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label="Filter by Class"
+                    >
+                      {AVAILABLE_CLASSES.map((cls) => (
+                        <option key={cls} value={cls}>
+                          {cls}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </th>
                 <th className="p-4 text-left">Status</th>
                 <th className="p-4 text-center">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {students.map((s) => (
+              {filteredStudents.map((s) => (
                 <tr key={s.id} className="hover:bg-slate-50">
                   <td className="p-4 font-mono">{s.id}</td>
                   <td className="p-4 font-bold">{s.surname}</td>
@@ -6168,324 +4267,6 @@ export default function App() {
               ))}
             </tbody>
           </table>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderSetup = () => (
-    <div className="space-y-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="text-2xl font-bold text-slate-800">
-          System Setup & Configuration
-        </h2>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
-          <div className="flex items-center gap-2 mb-4 text-blue-800 border-b border-blue-50 pb-2">
-            <ImageIcon size={20} />
-            <h3 className="text-lg font-bold">School Profile</h3>
-          </div>
-          <div className="space-y-4">
-            <div className="mb-6 p-4 bg-slate-50 rounded-lg border border-slate-100">
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                School Logo (Terminal Reports)
-              </label>
-              <div className="flex flex-col items-center justify-center gap-4">
-                <div className="relative group w-32 h-32 bg-white rounded-lg shadow-sm border border-slate-200 flex items-center justify-center overflow-hidden">
-                  {schoolConfig.logoUrl ? (
-                    <img
-                      src={schoolConfig.logoUrl}
-                      alt="School Logo"
-                      className="w-full h-full object-contain p-2"
-                    />
-                  ) : (
-                    <ImageIcon className="text-slate-300" size={48} />
-                  )}
-                  {isProcessingLogo && (
-                    <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
-                      <Loader2
-                        className="animate-spin text-blue-600"
-                        size={24}
-                      />
-                    </div>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center justify-center gap-2 w-full">
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleLogoUpload}
-                    accept=".png,.jpg,.jpeg,.svg"
-                    className="hidden"
-                    aria-label="Upload logo"
-                    title="Upload logo"
-                  />
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 text-blue-700 text-sm font-medium rounded hover:bg-blue-200 transition-colors"
-                  >
-                    <Upload size={14} /> Upload
-                  </button>
-                  <button
-                    onClick={saveLogoToServer}
-                    disabled={!logoFile || isLogoUploading}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                      !logoFile || isLogoUploading
-                        ? "bg-emerald-200 text-white cursor-not-allowed"
-                        : "bg-emerald-600 text-white hover:bg-emerald-700"
-                    }`}
-                    aria-label="Save logo"
-                    title="Save logo"
-                  >
-                    {isLogoUploading ? (
-                      <>
-                        <Loader2 size={14} className="animate-spin" /> Saving...
-                      </>
-                    ) : (
-                      <>
-                        <Save size={14} /> Save
-                      </>
-                    )}
-                  </button>
-                  {schoolConfig.logoUrl && (
-                    <>
-                      <button
-                        onClick={rotateLogo}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 text-sm font-medium rounded hover:bg-slate-200 transition-colors"
-                      >
-                        <RotateCw size={14} /> Rotate
-                      </button>
-                      <button
-                        onClick={removeLogo}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 text-sm font-medium rounded hover:bg-red-100 transition-colors"
-                      >
-                        <Trash2 size={14} /> Remove
-                      </button>
-                    </>
-                  )}
-                </div>
-                <div className="text-center">
-                  {logoError ? (
-                    <p className="text-xs text-red-600 flex items-center gap-1 justify-center">
-                      <AlertCircle size={12} /> {logoError}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-slate-500">
-                      Rec: 300x300px (Max 2MB)
-                    </p>
-                  )}
-                </div>
-                {logoFeedback && (
-                  <p className="text-xs text-emerald-700">{logoFeedback}</p>
-                )}
-                {schoolConfig.logoUrl && (
-                  <button
-                    onClick={() => setCurrentView("report")}
-                    className="w-full mt-2 flex items-center justify-center gap-2 text-xs text-blue-600 hover:underline"
-                  >
-                    <Eye size={12} /> Test on Report
-                  </button>
-                )}
-              </div>
-            </div>
-            <div>
-              <label
-                htmlFor="school-name"
-                className="block text-sm font-medium text-slate-700 mb-1"
-              >
-                School Name
-              </label>
-              <input
-                id="school-name"
-                type="text"
-                value={schoolConfig.name}
-                onChange={(e) =>
-                  setSchoolConfig({ ...schoolConfig, name: e.target.value })
-                }
-                className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="motto"
-                className="block text-sm font-medium text-slate-700 mb-1"
-              >
-                Motto
-              </label>
-              <input
-                id="motto"
-                type="text"
-                value={schoolConfig.motto}
-                onChange={(e) =>
-                  setSchoolConfig({ ...schoolConfig, motto: e.target.value })
-                }
-                className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="head-teacher"
-                className="block text-sm font-medium text-slate-700 mb-1"
-              >
-                Head Teacher's Name
-              </label>
-              <input
-                id="head-teacher"
-                type="text"
-                value={schoolConfig.headTeacher}
-                onChange={(e) =>
-                  setSchoolConfig({
-                    ...schoolConfig,
-                    headTeacher: e.target.value,
-                  })
-                }
-                className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="school-address"
-                className="block text-sm font-medium text-slate-700 mb-1"
-              >
-                School Address
-              </label>
-              <textarea
-                id="school-address"
-                value={schoolConfig.address}
-                onChange={(e) =>
-                  setSchoolConfig({ ...schoolConfig, address: e.target.value })
-                }
-                className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none h-20 resize-none"
-              />
-            </div>
-          </div>
-        </div>
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 h-fit">
-          <div className="flex items-center gap-2 mb-4 text-emerald-800 border-b border-emerald-50 pb-2">
-            <Calendar size={20} />
-            <h3 className="text-lg font-bold">Academic Configuration</h3>
-          </div>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label
-                  htmlFor="academic-year"
-                  className="block text-sm font-medium text-slate-700 mb-1"
-                >
-                  Current Year
-                </label>
-                <select
-                  id="academic-year"
-                  value={academicYear}
-                  onChange={(e) => setAcademicYear(e.target.value)}
-                  className="w-full p-2 border border-slate-300 rounded bg-slate-50"
-                >
-                  {academicYearOptions.map((y) => (
-                    <option key={y} value={y}>
-                      {y}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label
-                  htmlFor="current-term"
-                  className="block text-sm font-medium text-slate-700 mb-1"
-                >
-                  Current Term
-                </label>
-                <select
-                  id="current-term"
-                  value={term}
-                  onChange={(e) => setTerm(e.target.value)}
-                  className="w-full p-2 border border-slate-300 rounded bg-slate-50"
-                >
-                  <option>Term 1</option>
-                  <option>Term 2</option>
-                  <option>Term 3</option>
-                </select>
-              </div>
-            </div>
-            <div className="pt-4 border-t border-slate-100 mt-4">
-              <h4 className="text-sm font-bold text-slate-800 mb-3">
-                Assessment Weighting
-              </h4>
-              <div className="flex items-center gap-4">
-                <div className="flex-1">
-                  <label
-                    htmlFor="cat-weight"
-                    className="block text-xs font-bold text-slate-500 mb-1"
-                  >
-                    Class Score (CAT)
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="cat-weight"
-                      type="number"
-                      value={schoolConfig.catWeight}
-                      onChange={(e) =>
-                        setSchoolConfig({
-                          ...schoolConfig,
-                          catWeight: parseInt(e.target.value),
-                          examWeight: 100 - parseInt(e.target.value),
-                        })
-                      }
-                      className="w-full p-2 border border-slate-300 rounded pr-8"
-                    />
-                    <span className="absolute right-3 top-2 text-slate-400 text-sm">
-                      %
-                    </span>
-                  </div>
-                </div>
-                <div className="font-bold text-slate-400 pt-5">:</div>
-                <div className="flex-1">
-                  <label
-                    htmlFor="exam-weight"
-                    className="block text-xs font-bold text-slate-500 mb-1"
-                  >
-                    Exam Score
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="exam-weight"
-                      type="number"
-                      value={schoolConfig.examWeight}
-                      readOnly
-                      className="w-full p-2 border border-slate-300 rounded bg-slate-50 pr-8"
-                    />
-                    <span className="absolute right-3 top-2 text-slate-400 text-sm">
-                      %
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <p className="text-xs text-slate-500 mt-2 italic">
-                Note: Changing weighting requires system recalculation.
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
-          <div className="flex items-center gap-2 mb-4 text-slate-800 border-b border-slate-50 pb-2">
-            <ImageIcon size={20} />
-            <h3 className="text-lg font-bold">Headmaster's Signature</h3>
-          </div>
-          <SignatureUpload
-            value={schoolConfig.headSignatureUrl ?? null}
-            onChange={(url) =>
-              setSchoolConfig((prev) => ({ ...prev, headSignatureUrl: url }))
-            }
-            academicYear={academicYear}
-            term={term}
-            enabled={!!schoolConfig.signatureEnabled}
-            onToggleEnabled={(enabled) =>
-              setSchoolConfig((prev) => ({
-                ...prev,
-                signatureEnabled: enabled,
-              }))
-            }
-          />
         </div>
       </div>
     </div>
@@ -6565,10 +4346,62 @@ export default function App() {
           </div>
         )}
         {currentView === "subject" && renderSubjectSheet()}
-        {currentView === "report" && renderReportCard()}
+        {currentView === "report" && (
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center h-64">
+                <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+              </div>
+            }
+          >
+            <ReportCards
+              students={students}
+              filteredStudents={filteredStudents}
+              marks={marks}
+              setMarks={setMarks}
+              schoolConfig={schoolConfig}
+              academicYear={academicYear}
+              term={term}
+              selectedClass={selectedClass}
+              user={user}
+              gradingSystem={gradingSystem}
+            />
+          </Suspense>
+        )}
         {currentView === "masterdb" && renderMasterDB()}
-        {currentView === "setup" && renderSetup()}
-        {currentView === "ranking" && renderRankingReport()}
+        {currentView === "setup" && (
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center h-64">
+                <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+              </div>
+            }
+          >
+            <SystemSetup
+              schoolConfig={schoolConfig}
+              setSchoolConfig={setSchoolConfig}
+              academicYear={academicYear}
+              setAcademicYear={setAcademicYear}
+              academicYearOptions={academicYearOptions}
+              term={term}
+              setTerm={setTerm}
+              onNavigate={setCurrentView}
+            />
+          </Suspense>
+        )}
+        {currentView === "ranking" && (
+          <RankingReport
+            rankingData={rankingData}
+            rankingLoading={rankingLoading}
+            rankingError={rankingError}
+            rankingClassFilter={rankingClassFilter}
+            setRankingClassFilter={setRankingClassFilter}
+            rankingPage={rankingPage}
+            setRankingPage={setRankingPage}
+            onBack={() => setCurrentView("home")}
+            onDownload={downloadRankingReport}
+          />
+        )}
         {renderAssessmentUploadModal()}
       </main>
       <footer

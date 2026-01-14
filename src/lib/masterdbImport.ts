@@ -17,15 +17,15 @@ type Row = Record<string, unknown>;
 
 export function buildImportedStudents(
   importedPreview: Row[],
-  existingStudents: Student[],
+  existingStudentIds: Set<string>,
   selectedClass: string,
   academicYear: string
 ): { newStudents: Student[]; addedCount: number; skippedCount: number } {
   const newStudents: Student[] = [];
-  const existingIds = new Set(existingStudents.map((s) => s.id));
   const newIds = new Set<string>();
   const yearSuffix = academicYear.substring(2, 4);
-  let currentSeq = existingStudents.length + 1;
+  // Estimate sequence based on existing size (approximation)
+  let currentSeq = existingStudentIds.size + 1;
   let addedCount = 0;
   let skippedCount = 0;
 
@@ -38,7 +38,7 @@ export function buildImportedStudents(
       currentSeq++;
     }
 
-    if (existingIds.has(newId) || newIds.has(newId)) {
+    if (existingStudentIds.has(newId) || newIds.has(newId)) {
       skippedCount++;
       return;
     }

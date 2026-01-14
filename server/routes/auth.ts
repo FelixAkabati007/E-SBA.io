@@ -10,6 +10,7 @@ const JWT_SECRET = process.env.JWT_SECRET || "super-secret-key-change-this";
 // Login
 router.post("/login", async (req, res) => {
   const { username, password } = req.body;
+  console.log(`[Auth] Login attempt for user: ${username}`);
 
   if (!username || !password) {
     return res
@@ -17,8 +18,9 @@ router.post("/login", async (req, res) => {
       .json({ error: "Username and password are required" });
   }
 
-  const client = await pool.connect();
+  let client;
   try {
+    client = await pool.connect();
     const { rows } = await client.query(
       `SELECT u.*, c.class_name, s.subject_name 
        FROM users u
@@ -67,9 +69,10 @@ router.post("/login", async (req, res) => {
     });
   } catch (error) {
     console.error("Login error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    const msg = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: "Internal server error", details: msg });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -78,8 +81,9 @@ router.get("/me", authenticateToken, async (req: AuthRequest, res) => {
   const userId = req.user?.userId;
   if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
-  const client = await pool.connect();
+  let client;
   try {
+    client = await pool.connect();
     const { rows } = await client.query(
       `SELECT u.user_id, u.username, u.full_name, u.role, 
               u.assigned_class_id, u.assigned_subject_id,
@@ -107,11 +111,12 @@ router.get("/me", authenticateToken, async (req: AuthRequest, res) => {
         assignedSubjectName: user.subject_name,
       },
     });
-  } catch (_error) {
-    void _error;
-    res.status(500).json({ error: "Internal server error" });
+  } catch (error) {
+    console.error("Auth /me error:", error);
+    const msg = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: "Internal server error", details: msg });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 

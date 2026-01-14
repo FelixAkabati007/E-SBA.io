@@ -4,6 +4,7 @@ import type {
   UploadAssessmentResponse,
   SubjectSheetQuery,
   SubjectSheetResponse,
+  AssessmentMarkRow,
   ApiError,
 } from "./apiTypes";
 
@@ -82,9 +83,17 @@ async function request<T>(
         ? ((await resp.json()) as unknown)
         : ((await resp.text()) as unknown);
       if (!resp.ok) {
-        const err =
-          (isJson ? (data as ApiError)?.error : String(data)) ||
-          `HTTP ${resp.status}`;
+        let err = `HTTP ${resp.status}`;
+        if (isJson) {
+          const d = data as { error?: string; details?: string };
+          if (d.error) err = d.error;
+          if (d.details) err += ` (${d.details})`;
+          if (!d.error && !d.details) err += ` (Body: ${JSON.stringify(d)})`;
+        } else if (String(data)) {
+          err = String(data);
+        } else {
+          err += " (Empty response)";
+        }
         throw new Error(err);
       }
       return data as T;
@@ -172,26 +181,43 @@ export const apiClient = {
       )}&class=${encodeURIComponent(q.class)}&year=${encodeURIComponent(
         q.academicYear
       )}&term=${encodeURIComponent(q.term)}`,
-      "GET"
+      "GET",
+      undefined,
+      undefined,
+      2,
+      true // Enable cache
     );
   },
   async getAllClassMarks(q: {
     class: string;
     academicYear: string;
     term: string;
-  }): Promise<Record<string, any[]>> {
-    const data = await request<{ allMarks: Record<string, any[]> }>(
+  }): Promise<Record<string, AssessmentMarkRow[]>> {
+    const data = await request<{
+      allMarks: Record<string, AssessmentMarkRow[]>;
+    }>(
       `/assessments?class=${encodeURIComponent(
         q.class
       )}&year=${encodeURIComponent(q.academicYear)}&term=${encodeURIComponent(
         q.term
       )}`,
-      "GET"
+      "GET",
+      undefined,
+      undefined,
+      2,
+      true // Enable cache
     );
     return data.allMarks;
   },
   async getStudents(): Promise<StudentRecord[]> {
-    return request<StudentRecord[]>("/students", "GET");
+    return request<StudentRecord[]>(
+      "/students",
+      "GET",
+      undefined,
+      undefined,
+      2,
+      true
+    );
   },
   async upsertStudent(student: StudentRecord): Promise<void> {
     await request("/students", "POST", student);
