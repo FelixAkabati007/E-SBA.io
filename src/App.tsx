@@ -67,6 +67,98 @@ import SignOutButton from "./components/SignOutButton";
 
 const MasterDBSyncControls: React.FC = () => null;
 
+// --- Chunked Upload Helper ---
+async function uploadFileChunked(
+  file: File,
+  onProgress: (pct: number) => void
+): Promise<number> {
+  const token =
+    localStorage.getItem("token") || localStorage.getItem("API_AUTH_TOKEN");
+  const headers = { Authorization: `Bearer ${token}` };
+
+  // 1. Init
+  const initRes = await fetch("/api/students/upload/init", {
+    method: "POST",
+    headers,
+  });
+  if (!initRes.ok) throw new Error("Failed to init upload");
+  const { uploadId } = await initRes.json();
+
+  const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  let uploadedChunks = 0;
+
+  const chunks = Array.from({ length: totalChunks }, (_, i) => i);
+  const CONCURRENCY = 3; // Parallel processing
+
+  const uploadChunk = async (i: number) => {
+    const start = i * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    const blob = file.slice(start, end);
+    const formData = new FormData();
+    formData.append("uploadId", uploadId);
+    formData.append("chunkIndex", String(i));
+    formData.append("chunk", blob);
+
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        const res = await fetch("/api/students/upload/chunk", {
+          method: "POST",
+          headers, // Content-Type is auto-set for FormData
+          body: formData,
+        });
+        if (!res.ok) throw new Error(`Chunk ${i} failed`);
+        uploadedChunks++;
+        onProgress(Math.round((uploadedChunks / totalChunks) * 90));
+        return;
+      } catch (e) {
+        retries--;
+        if (retries === 0) throw e;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+  };
+
+  // Run pool
+  const executing: Promise<void>[] = [];
+  for (const i of chunks) {
+    const p = uploadChunk(i);
+    executing.push(p);
+    if (executing.length >= CONCURRENCY) {
+      await Promise.race(executing);
+      // Remove finished
+      // Note: Promise.race returns the value of the first resolved, but doesn't mutate array.
+      // We need to manage `executing` array.
+      // Simpler: Just wait for one to finish.
+      // Actually, standard pool pattern:
+    }
+    // Clean up finished promises
+    // This simple loop doesn't perfectly cap at CONCURRENCY but keeps adding.
+    // Correct pool implementation:
+    p.then(() => executing.splice(executing.indexOf(p), 1));
+    if (executing.length >= CONCURRENCY) {
+      await Promise.race(executing);
+    }
+  }
+  await Promise.all(executing);
+
+  // 2. Complete
+  onProgress(95);
+  const completeRes = await fetch("/api/students/upload/complete", {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ uploadId, fileName: file.name }),
+  });
+  if (!completeRes.ok) {
+    const err = await completeRes.json();
+    throw new Error(err.error || "Upload processing failed");
+  }
+  const data = await completeRes.json();
+  onProgress(100);
+  return data.count;
+}
+
 type Gender = "Male" | "Female" | "Other";
 
 interface Student {
@@ -916,6 +1008,8 @@ export default function App() {
     setIsImporting(true);
     setImportLogs([]);
     setImportedPreview([]);
+    setSelectedImportFile(file);
+    setImportProgress(0);
 
     (async () => {
       try {
@@ -1169,30 +1263,65 @@ export default function App() {
   };
 
   const processImport = async () => {
-    if (importedPreview.length === 0) return;
+    if (!selectedImportFile && importedPreview.length === 0) return;
     setIsImporting(true);
+    setImportProgress(0);
     // Yield to allow UI update
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     try {
-      const { newStudents, addedCount, skippedCount } = buildImportedStudents(
-        importedPreview,
-        existingStudentIds,
-        selectedClass,
-        academicYear
-      );
-      if (newStudents.length > 0) {
+      if (selectedImportFile) {
+        // Client-side Validation
+        if (selectedImportFile.size === 0) throw new Error("File is empty");
+
+        const count = await uploadFileChunked(selectedImportFile, (pct) =>
+          setImportProgress(pct)
+        );
+
+        setImportLogs((prev) => [
+          ...prev,
+          {
+            status: "success",
+            message: `Import Successful! Processed ${count} records via fast upload.`,
+          },
+        ]);
+
+        // Refresh list
         try {
-          // Chunked upload for performance
+          const fresh = await apiClient.getStudents();
+          setStudents(fresh);
+        } catch {
+          // ignore
+        }
+      } else {
+        // Fallback to legacy client-side processing
+        const { newStudents, addedCount, skippedCount } = buildImportedStudents(
+          importedPreview,
+          existingStudentIds,
+          selectedClass,
+          academicYear
+        );
+        if (newStudents.length > 0) {
           const CHUNK_SIZE = 50;
-          for (let i = 0; i < newStudents.length; i += CHUNK_SIZE) {
+          const total = newStudents.length;
+          let processed = 0;
+          for (let i = 0; i < total; i += CHUNK_SIZE) {
             const chunk = newStudents.slice(i, i + CHUNK_SIZE);
             await apiClient.request("/students/batch", "POST", {
               students: chunk,
             });
+            processed += chunk.length;
+            setImportProgress(Math.round((processed / total) * 100));
           }
 
-          setStudents((prev) => [...prev, ...newStudents]);
+          // Refresh list
+          try {
+            const fresh = await apiClient.getStudents();
+            setStudents(fresh);
+          } catch {
+            // ignore
+          }
+
           setImportLogs((prev) => [
             ...prev,
             {
@@ -1209,38 +1338,31 @@ export default function App() {
               },
             ]);
           }
-          setImportedPreview([]);
-        } catch (e) {
+        } else {
           setImportLogs((prev) => [
             ...prev,
             {
-              status: "error",
-              message: "unsucessful",
+              status: "warning",
+              message:
+                "No valid students found to import. Check required columns.",
             },
           ]);
-          console.error("Import failed:", e);
         }
-      } else {
-        setImportLogs((prev) => [
-          ...prev,
-          {
-            status: "warning",
-            message:
-              "No valid students found to import. Check required columns.",
-          },
-        ]);
       }
+      setImportedPreview([]);
+      setSelectedImportFile(null);
     } catch (e) {
       setImportLogs((prev) => [
         ...prev,
         {
           status: "error",
-          message: "unsucessful",
+          message: e instanceof Error ? e.message : "unsucessful",
         },
       ]);
       console.error("Import processing error:", e);
     } finally {
       setIsImporting(false);
+      setImportProgress(0);
     }
   };
 
@@ -3922,6 +4044,7 @@ export default function App() {
                       onClick={() => {
                         setImportedPreview([]);
                         setImportLogs([]);
+                        setSelectedImportFile(null);
                       }}
                       className="text-xs sm:text-sm text-red-600 hover:text-red-700 hover:underline font-medium"
                     >
@@ -4028,14 +4151,28 @@ export default function App() {
                   onClick={processImport}
                   disabled={isImporting}
                   className={`px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium shadow-sm flex items-center gap-2 transition-all hover:shadow-md ${
-                    isImporting ? "opacity-70 cursor-not-allowed" : ""
+                    isImporting
+                      ? "cursor-not-allowed min-w-[200px] justify-center"
+                      : ""
                   }`}
                 >
                   {isImporting ? (
-                    <>
-                      <Loader2 size={18} className="animate-spin" />
-                      Uploading...
-                    </>
+                    <div className="flex flex-col items-center w-full">
+                      <div className="flex items-center gap-2 text-sm mb-1">
+                        <Loader2 size={14} className="animate-spin" />
+                        <span>
+                          {importProgress < 100
+                            ? `Uploading ${importProgress}%`
+                            : "Processing..."}
+                        </span>
+                      </div>
+                      <div className="w-full bg-emerald-800/30 rounded-full h-1">
+                        <div
+                          className="bg-white h-1 rounded-full transition-all duration-300"
+                          style={{ width: `${importProgress}%` }}
+                        />
+                      </div>
+                    </div>
                   ) : (
                     <>
                       <Download size={18} /> Confirm Import
