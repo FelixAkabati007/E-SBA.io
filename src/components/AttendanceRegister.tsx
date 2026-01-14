@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { apiClient } from "../lib/apiClient";
 import { Calendar, AlertCircle, CheckCircle } from "lucide-react";
+import { useAuth } from "../context/AuthContext";
 
 interface AttendanceRegisterProps {
   className: string;
@@ -23,14 +24,35 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({
   academicYear,
   term,
 }) => {
+  const { user } = useAuth();
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [students, setStudents] = useState<AttendanceRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const canEditRegister =
+    !!user &&
+    (user.role === "HEAD" ||
+      (user.role === "CLASS" && user.assignedClassName === className));
+
+  const summary = useMemo(() => {
+    const base = {
+      Present: 0,
+      Late: 0,
+      Absent: 0,
+      Excused: 0,
+    } as Record<string, number>;
+    for (const s of students) {
+      if (s.status && base[s.status] !== undefined) {
+        base[s.status] += 1;
+      }
+    }
+    return base;
+  }, [students]);
+
   useEffect(() => {
     if (className) {
-      loadAttendance();
+      void loadAttendance();
     }
   }, [className, date]);
 
@@ -43,28 +65,75 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({
     } catch (e) {
       setError("Failed to load attendance data");
       console.error(e);
-      setStudents([]); // Ensure students is reset on error
+      setStudents([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleStatusChange = async (studentId: string, status: string) => {
+  const parseTimeToMinutes = (time: string | null) => {
+    if (!time) return null;
+    const parts = time.split(":");
+    if (parts.length < 2) return null;
+    const h = Number(parts[0]);
+    const m = Number(parts[1]);
+    if (Number.isNaN(h) || Number.isNaN(m)) return null;
+    return h * 60 + m;
+  };
+
+  const deriveStatusFromTime = (
+    time: string | null
+  ): "Present" | "Late" | "Absent" | null => {
+    const mins = parseTimeToMinutes(time);
+    if (mins === null) return null;
+    const eight = 8 * 60;
+    const twelve = 12 * 60;
+    if (mins <= eight) return "Present";
+    if (mins > eight && mins <= twelve) return "Late";
+    return "Absent";
+  };
+
+  const handleStatusChange = async (studentId: string, nextStatus: string) => {
+    if (!canEditRegister) return;
+    const currentRow = students.find((s) => s.student_id === studentId);
+    if (!currentRow) return;
+
+    let reason: string | undefined;
+    const mins = parseTimeToMinutes(currentRow.arrival_time);
+    const twelve = 12 * 60;
+    if (
+      mins !== null &&
+      mins > twelve &&
+      currentRow.status === "Absent" &&
+      nextStatus !== "Absent"
+    ) {
+      const input = window.prompt(
+        "Provide a reason to override Absent after 12:00 PM:"
+      );
+      if (!input) {
+        return;
+      }
+      reason = input;
+    }
+
+    const previous = students;
     setStudents((prev) =>
       prev.map((s) =>
-        s.student_id === studentId ? { ...s, status, pending: true } : s
+        s.student_id === studentId
+          ? { ...s, status: nextStatus, pending: true }
+          : s
       )
     );
 
     try {
-      const row = students.find((s) => s.student_id === studentId);
       await apiClient.markDailyAttendance({
         studentId,
         date,
-        status,
-        time: row?.arrival_time || undefined,
+        status: nextStatus,
+        time: currentRow.arrival_time || undefined,
         academicYear,
         term,
+        reason,
       });
 
       setStudents((prev) =>
@@ -80,26 +149,39 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({
       );
     } catch (e) {
       console.error("Failed to mark attendance", e);
-      // Revert UI?
+      setError("Failed to update attendance. Please try again.");
+      setStudents(previous);
     }
   };
 
   const handleTimeChange = async (studentId: string, time: string) => {
+    if (!canEditRegister) return;
+    const currentRow = students.find((s) => s.student_id === studentId);
+    if (!currentRow) return;
+
+    const derived = time ? deriveStatusFromTime(time) : null;
+    const nextStatus = derived || currentRow.status || "Present";
+
+    const previous = students;
     setStudents((prev) =>
       prev.map((s) =>
         s.student_id === studentId
-          ? { ...s, arrival_time: time, pending: true }
+          ? {
+              ...s,
+              arrival_time: time || null,
+              status: nextStatus,
+              pending: true,
+            }
           : s
       )
     );
 
     try {
-      const row = students.find((s) => s.student_id === studentId);
       await apiClient.markDailyAttendance({
         studentId,
         date,
-        time,
-        status: row?.status || "Present",
+        time: time || undefined,
+        status: nextStatus,
         academicYear,
         term,
       });
@@ -116,12 +198,14 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({
       );
     } catch (e) {
       console.error("Failed to save time", e);
+      setError("Failed to save arrival time. Please try again.");
+      setStudents(previous);
     }
   };
 
   return (
     <div className="bg-white rounded-lg shadow p-6">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold flex items-center gap-2">
           <Calendar className="w-5 h-5 text-blue-600" />
           Daily Register: {className}
@@ -135,13 +219,34 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({
             className="border rounded px-3 py-2 text-sm"
           />
           <button
-            onClick={loadAttendance}
+            onClick={() => void loadAttendance()}
             className="text-blue-600 text-sm hover:underline"
           >
             Refresh
           </button>
         </div>
       </div>
+
+      <div className="flex items-center justify-between mb-4 text-xs text-slate-600">
+        <div>
+          <span className="font-semibold">Rules:</span> Arrival ≤ 8:00 →
+          Present; 8:01–12:00 → Late; after 12:00 → Absent.
+        </div>
+        <div className="flex gap-3">
+          <span>Present: {summary.Present}</span>
+          <span>Late: {summary.Late}</span>
+          <span>Absent: {summary.Absent}</span>
+          <span>Excused: {summary.Excused}</span>
+        </div>
+      </div>
+
+      {!canEditRegister && (
+        <div className="bg-yellow-50 text-yellow-700 p-3 rounded mb-4 text-xs flex items-center gap-2">
+          <AlertCircle className="w-4 h-4" />
+          You have view-only access to this register. Only Class Teachers and
+          Head can edit.
+        </div>
+      )}
 
       {error && (
         <div className="bg-red-50 text-red-600 p-3 rounded mb-4 flex items-center gap-2">
@@ -181,6 +286,8 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({
                         (status) => (
                           <button
                             key={status}
+                            type="button"
+                            disabled={!canEditRegister}
                             onClick={() =>
                               handleStatusChange(student.student_id, status)
                             }
@@ -188,6 +295,10 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({
                               student.status === status
                                 ? getStatusColor(status)
                                 : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                            } ${
+                              !canEditRegister
+                                ? "opacity-60 cursor-not-allowed"
+                                : ""
                             }`}
                           >
                             {status}
@@ -204,7 +315,12 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({
                       onChange={(e) =>
                         handleTimeChange(student.student_id, e.target.value)
                       }
-                      className="border rounded px-2 py-1 text-center w-24"
+                      disabled={!canEditRegister}
+                      className={`border rounded px-2 py-1 text-center w-24 ${
+                        !canEditRegister
+                          ? "bg-slate-50 text-slate-400 cursor-not-allowed"
+                          : ""
+                      }`}
                     />
                   </td>
                   <td className="px-4 py-3 text-center">
