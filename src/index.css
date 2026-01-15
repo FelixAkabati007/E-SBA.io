@@ -6,6 +6,12 @@
   overflow-x: hidden;
 }
 
+/* Scroll behavior styles for main container */
+.main-scroll {
+  scroll-padding-top: 64px;
+  -webkit-overflow-scrolling: touch;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .welcome-loader .ball,
   .welcome-loader .bar {

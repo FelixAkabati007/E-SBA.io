@@ -2166,7 +2166,6 @@ export default function App() {
                 ? "opacity-100 translate-y-0 block"
                 : "opacity-0 -translate-y-2 hidden"
             }`}
-            aria-hidden={subjectRevealStep < 1 ? "true" : "false"}
           >
             <ProgressBar
               scope="subject"
@@ -2232,7 +2231,6 @@ export default function App() {
                     ? "opacity-100 translate-y-0 block"
                     : "opacity-0 -translate-y-2 hidden"
                 }`}
-                aria-hidden={subjectRevealStep < 2 ? "true" : "false"}
               >
                 <section
                   className="grid grid-cols-2 md:grid-cols-5 gap-4"
@@ -4533,10 +4531,7 @@ export default function App() {
           <SignOutButton onLogout={logout} />
         </div>
       </div>
-      <main
-        className="p-4 pb-20 overflow-y-auto overscroll-y-contain scroll-smooth"
-        style={{ WebkitOverflowScrolling: "touch", scrollPaddingTop: "64px" }}
-      >
+      <main className="p-4 pb-20 overflow-y-auto overscroll-y-contain scroll-smooth main-scroll">
         {currentView === "home" && renderHome()}
         {currentView === "register" && (
           <div className="space-y-6 animate-in fade-in duration-500">
