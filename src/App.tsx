@@ -2068,7 +2068,7 @@ export default function App() {
 
   const renderSubjectSheet = () => {
     return (
-      <div className="bg-white rounded-lg shadow-lg border border-slate-200 overflow-hidden flex flex-col h-[calc(100vh-100px)]">
+      <div className="bg-white rounded-lg shadow-lg border border-slate-200 overflow-hidden flex flex-col">
         <div className="p-4 bg-blue-50 border-b border-blue-100 flex justify-between items-center">
           <div>
             <h2 className="text-xl font-bold text-blue-900">
@@ -2283,7 +2283,7 @@ export default function App() {
             );
           })()}
         </div>
-        <div className="overflow-auto flex-1">
+        <div className="flex-1">
           {isGeneratingTemplate && (
             <div
               role="status"
