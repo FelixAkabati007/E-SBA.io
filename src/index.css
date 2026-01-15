@@ -12,6 +12,11 @@
   -webkit-overflow-scrolling: touch;
 }
 
+/* Isolate assessment container for better paint/layout performance */
+.assessment-container {
+  contain: content;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .welcome-loader .ball,
   .welcome-loader .bar {

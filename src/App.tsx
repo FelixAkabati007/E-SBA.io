@@ -2068,8 +2068,8 @@ export default function App() {
 
   const renderSubjectSheet = () => {
     return (
-      <div className="bg-white rounded-lg shadow-lg border border-slate-200 overflow-hidden flex flex-col">
-        <div className="p-4 bg-blue-50 border-b border-blue-100 flex justify-between items-center">
+      <div className="bg-white rounded-lg shadow-lg border border-slate-200 overflow-hidden flex flex-col assessment-container">
+        <div className="px-4 py-3 sm:px-6 sm:py-4 bg-blue-50 border-b border-blue-100 flex justify-between items-center">
           <div>
             <h2 className="text-xl font-bold text-blue-900">
               {activeSubject} Assessment Sheet
@@ -2291,7 +2291,7 @@ export default function App() {
               {templateStatus}
             </div>
           )}
-          <table className="w-full text-sm text-left">
+          <table className="w-full text-xs md:text-sm text-left table-fixed">
             <thead className="text-xs text-slate-700 uppercase bg-slate-100 sticky top-0 z-10 shadow-sm">
               <tr>
                 <th className="px-4 py-3 w-16">ID</th>
