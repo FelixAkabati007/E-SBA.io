@@ -1,11 +1,15 @@
 import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import { pool } from "../lib/db";
 import { AuthRequest, authenticateToken } from "../middleware/auth";
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "super-secret-key-change-this";
+const JWT_ISSUER = process.env.JWT_ISSUER || "e-sba";
+const JWT_AUDIENCE = process.env.JWT_AUDIENCE || "e-sba-users";
+const SESSION_TTL_MIN = parseInt(process.env.SESSION_TTL_MIN || "120", 10);
 type DBUserRow = {
   user_id: number;
   username: string;
@@ -22,15 +26,58 @@ const HAS_DB =
   !!process.env.POSTGRES_URL ||
   !!process.env.NEON_DATABASE_URL;
 
+function parseCookies(
+  cookieHeader: string | undefined
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!cookieHeader) return out;
+  const parts = cookieHeader.split(";").map((s) => s.trim());
+  for (const p of parts) {
+    const idx = p.indexOf("=");
+    if (idx > 0) {
+      const k = p.slice(0, idx);
+      const v = p.slice(idx + 1);
+      out[k] = decodeURIComponent(v);
+    }
+  }
+  return out;
+}
+
+router.get("/csrf", (_req, res) => {
+  const token = crypto.randomBytes(32).toString("hex");
+  res.cookie("csrf-token", token, {
+    httpOnly: false,
+    secure: !!process.env.VERCEL,
+    sameSite: "strict",
+    path: "/",
+    maxAge: 30 * 60 * 1000,
+  });
+  res.json({ token });
+});
+
 // Login
 router.post("/login", async (req, res) => {
   const { username, password } = req.body;
   console.log(`[Auth] Login attempt for user: ${username}`);
 
+  const cookies = parseCookies(req.headers.cookie);
+  const csrfHeader = String(req.headers["x-csrf-token"] || "");
+  const csrfCookie = String(cookies["csrf-token"] || "");
+  if (!csrfHeader || !csrfCookie || csrfHeader !== csrfCookie) {
+    return res.status(403).json({ error: "Forbidden: CSRF validation failed" });
+  }
+
   if (!username || !password) {
     return res
       .status(400)
       .json({ error: "Username and password are required" });
+  }
+  const u = String(username).trim();
+  const p = String(password);
+  const uValid = /^[a-zA-Z0-9_\\.\\-]{3,32}$/.test(u);
+  const pValid = p.length >= 8 && p.length <= 128;
+  if (!uValid || !pValid) {
+    return res.status(400).json({ error: "Invalid credentials format" });
   }
 
   // Preview fallback when database is not configured (for Vercel previews)
@@ -116,9 +163,12 @@ router.post("/login", async (req, res) => {
         assignedClassName: user.class_name,
         assignedSubjectId: user.assigned_subject_id,
         assignedSubjectName: user.subject_name,
+        sub: String(user.user_id),
+        aud: JWT_AUDIENCE,
+        iss: JWT_ISSUER,
       },
       JWT_SECRET,
-      { expiresIn: "8h" }
+      { expiresIn: `${SESSION_TTL_MIN}m` }
     );
 
     res.json({

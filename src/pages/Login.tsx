@@ -17,10 +17,21 @@ const Login: React.FC = () => {
     setError(null);
 
     try {
+      const csrf = await apiClient.request<{ token: string }>(
+        "/auth/csrf",
+        "GET"
+      );
       const data = await apiClient.request<{
         token: string;
         user: AuthUser;
-      }>("/auth/login", "POST", { username, password });
+      }>(
+        "/auth/login",
+        "POST",
+        { username, password },
+        {
+          "x-csrf-token": csrf.token,
+        }
+      );
 
       login(data.token, data.user);
     } catch (err) {

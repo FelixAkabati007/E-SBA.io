@@ -334,9 +334,10 @@ export const apiClient = {
   async request<T = unknown>(
     path: string,
     method: HttpMethod,
-    body?: unknown
+    body?: unknown,
+    headers?: Record<string, string>
   ): Promise<T> {
-    return request<T>(path, method, body);
+    return request<T>(path, method, body, headers);
   },
 };
 

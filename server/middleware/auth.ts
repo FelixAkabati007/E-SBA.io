@@ -14,6 +14,8 @@ export interface AuthRequest extends Request {
 }
 
 const JWT_SECRET = process.env.JWT_SECRET || "super-secret-key-change-this";
+const JWT_ISSUER = process.env.JWT_ISSUER || "e-sba";
+const JWT_AUDIENCE = process.env.JWT_AUDIENCE || "e-sba-users";
 
 export const authenticateToken = (
   req: AuthRequest,
@@ -27,13 +29,18 @@ export const authenticateToken = (
     return res.status(401).json({ error: "Unauthorized: No token provided" });
   }
 
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) {
-      return res.status(403).json({ error: "Forbidden: Invalid token" });
+  jwt.verify(
+    token,
+    JWT_SECRET,
+    { issuer: JWT_ISSUER, audience: JWT_AUDIENCE },
+    (err, user) => {
+      if (err) {
+        return res.status(403).json({ error: "Forbidden: Invalid token" });
+      }
+      req.user = user as AuthRequest["user"];
+      next();
     }
-    req.user = user as AuthRequest["user"];
-    next();
-  });
+  );
 };
 
 export const requireRole = (roles: string[]) => {

@@ -9,7 +9,6 @@
 /* Scroll behavior styles for main container */
 .main-scroll {
   scroll-padding-top: 64px;
-  -webkit-overflow-scrolling: touch;
 }
 
 /* Isolate assessment container for better paint/layout performance */
